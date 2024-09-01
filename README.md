@@ -1,6 +1,6 @@
 # connect-x
 
-> A general implementation of the classic game Connect 4 to train and test AI agents.
+A general implementation of the Connect-based games to train and test AI agents.
 
 ## Overview
 
@@ -8,13 +8,13 @@ In order to push the boundaries of AI research in the pursuit of creating more i
 
 Although Connect 4 is a relatively simple game that even children can learn and master, it nevertheless provides a rich and intellectual stimulating environment to train and evaluate agents on. However, since we wish to evaluate the ability of agents to generalize across task domains, having agents train only on Connect 4 would not be sufficient. Instead, we extend the game of Connect 4 to a more general version known as `connectx`, where one can configure the game parameters to quickly make different games.
 
-This creates a universe of environments that have fundamentally similarities.
+This creates a universe of environments that have fundamentally similarities and can serve as a stepping stone to build generally capable game-playing agents.
 
 ## Features
 
 - Customizable games using config objects.
 - Optimized execution using `numba`.
-- Saving and loading games
+- Utility functions to monitor and evaluate games.
 
 ## Installation
 
@@ -118,8 +118,28 @@ More examples on how to use the project can be found under the `/recipes` direct
 
 ## Configuration Options
 
+The base version of this project provides three configuration options to define a game:
+
+1. `shape: tuple[int, int]`: The shape of the game board. Requirement: `shape[0] > 0, shape[1] > 0`.
+2. `k: int`: The length of the line to win the game. Requirement: `k < max(shape[0], shape[1])`.
+3. `players: list[int]`: The number and identity of each player. Requirement: `len(players) > 1` and that there are at least two unique values in `players`.
+
+These are used to define a simple game, however, one can extend these to allow for more interesting variants.
+
 ## Extensions
+
+At its current state, this project only provides an interface to create parameterized variants of Connect 4. That is, essentially the game of Connect 4 with a different sized boards and line lengths to win the game. However, Connect 4 is part of a family of games known as m,n,k-game where within this family that are different games with different transition and termination rules.
+
+To extend this project in a meaningful way, one can use the primitives provided by this project directly or use them as inspiration to construct different types of games entirely. For example, the game of Gomuko, Connect6, Pente. Furthermore, there are even variants within Connect 4 itself with different game rules such as Pop 10, Pop Out, and Power Up.
+
+These provide rich environments to train agents on as well as good practice to design and build configurable versions of each new game.
 
 ## Contributions
 
+Contributions are always welcome! If you have any suggestions on ways to improve or extend this project please clone the repo, implement the changes, and create a pull request.
+
+If you would like to reach out to me to discuss your ideas or this project's mission in general feel free to reach out to me.
+
 ## License
+
+This project is under the Apache License Version 2.0. For full details please refer to the [license file](LICENSE).
