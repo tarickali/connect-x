@@ -22,7 +22,7 @@ def run(config: Config, agents: list[Agent]) -> State:
 
 
 if __name__ == "__main__":
-    config: Config = Config(shape=(6, 7), k=4, players=[1, 2])
+    config: Config = {"shape": (6, 7), "k": 4, "players": [1, 2]}
 
     agents = [RandomAgent(), RandomAgent()]
 

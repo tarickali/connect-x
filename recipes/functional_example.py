@@ -31,11 +31,11 @@ def run(config: Config, agents: list[Agent]) -> State:
         # Generate valid actions
         actions = cxf.generate_actions(grid)
 
-    return {"grid": grid, "active": active, "time": time}
+    return {"grid": grid, "info": {"active": active, "time": time}}
 
 
 if __name__ == "__main__":
-    config: Config = Config(shape=(6, 7), k=4, players=[1, 2])
+    config: Config = {"shape": (6, 7), "k": 4, "players": [1, 2]}
 
     agents = [RandomAgent(), RandomAgent()]
 

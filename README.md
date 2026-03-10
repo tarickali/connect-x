@@ -1,62 +1,106 @@
 # connect-x
 
-A general implementation of the Connect-based games to train and test AI agents.
+A **general, parameterized implementation of Connect-based games** for training and evaluating AI agents. Built for research and experimentation in agent generalization across task variants.
 
 ## Overview
 
 In order to push the boundaries of AI research in the pursuit of creating more intelligently capable agents, we need rich and complex environments to train and evaluate them. Although there already exist many research environments that provide interesting and difficult tasks from a wide range of domains, there are only a few projects that provide environments cater made to test the ability of an agent to generalize across task domains. This project is meant to help fill that gap.
 
-Although Connect 4 is a relatively simple game that even children can learn and master, it nevertheless provides a rich and intellectual stimulating environment to train and evaluate agents on. However, since we wish to evaluate the ability of agents to generalize across task domains, having agents train only on Connect 4 would not be sufficient. Instead, we extend the game of Connect 4 to a more general version known as `connectx`, where one can configure the game parameters to quickly make different games.
+Although Connect 4 is a relatively simple game that even children can learn and master, it nevertheless provides a rich and intellectually stimulating environment to train and evaluate agents on. However, since we wish to evaluate the ability of agents to generalize across task domains, having agents train only on Connect 4 would not be sufficient. Instead, we extend the game of Connect 4 to a more general version known as `connectx`, where one can configure the game parameters to quickly make different games.
 
 This creates a universe of environments that have fundamentally similarities and can serve as a stepping stone to build generally capable game-playing agents.
 
 ## Features
 
-- Customizable games using config objects.
-- Optimized execution using `numba`.
-- Utility functions to monitor and evaluate games.
+- **Parameterized games** — Board shape, win length `k`, and player set via a single config.
+- **Two APIs** — Functional (pure, numpy/numba-friendly) and class-based `Game` for different workflows.
+- **Numba-optimized core** — Grid operations and win detection compiled for speed.
+- **Pluggable agents** — Simple `Agent` protocol; ship a random agent and add your own.
+- **Utilities** — State serialization, terminal rendering, and helpers for training loops.
 
 ## Installation
 
-All requirements can be found in [requirements.txt](./requirements.txt). To install this project, follow the following steps:
+Requires **Python 3.10+**. Requirements are in [requirements.txt](./requirements.txt); you can also install the project (and optional test deps) with `pip install -e ".[test]"` from the repo root. Use a virtual environment.
 
-1. Clone repo
+1. **Clone the repository**
 
-```{bash}
-git clone https://github.com/tarickali/connectx.git
+```bash
+git clone https://github.com/tarickali/connect-x.git
+cd connect-x
 ```
 
-2. Create a virtual environment and install project requirements within the cloned repo
+2. **Create a virtual environment and install dependencies**
 
-```{bash}
-cd connectx
+```bash
+# Option 1: venv
+python -m venv .venv
+source .venv/bin/activate   # On Windows: .venv\Scripts\activate
 
-# Option 1. Using venv
-python -m venv connectx
-source connectx/bin/activate
-
-# Option 2. Using conda
-conda create -n connectx
+# Option 2: conda
+conda create -n connectx python=3.10
 conda activate connectx
 
-# Install pip modules
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-And that's it!
+To run tests: `pip install -e ".[test]"` then `pytest`.
+
+## Quick Start
+
+Run two random agents against each other (class API):
+
+```bash
+python main.py
+```
+
+Or use the recipes:
+
+```bash
+python recipes/class_example.py
+python recipes/functional_example.py
+```
 
 ## Usage
 
-There are two ways to interface with `connectx`: through a functional API and a class API. Below are examples of both APIs.
+You can use either a **functional API** (good for custom training loops and numba) or a **class-based API** (good for scripting and encapsulation).
 
-**Functional**:
+### Class-based API
 
-```{python3}
+```python
+from connectx import Config, Game
+from connectx.types import State
+from agents import RandomAgent
+from agents.types import Agent
+
+
+def run(config: Config, agents: list[Agent]) -> State:
+    game = Game(config)
+    state, actions = game.start()
+
+    while not game.terminal():
+        game.render()
+        action = agents[state["info"]["active"]].select(state, actions)
+        print(f"Action: {action}")
+        state, actions = game.transition(action)
+
+    return state
+
+
+if __name__ == "__main__":
+    config: Config = {"shape": (6, 7), "k": 4, "players": [1, 2]}
+    agents = [RandomAgent(), RandomAgent()]
+    final_state = run(config, agents)
+    print(final_state)
+```
+
+### Functional API
+
+```python
 from connectx.types import Config, State
 import connectx.functional as cxf
 from connectx.utils import make_state
 from connectx.renderer import terminal_render as render
-
 from agents.types import Agent
 from agents import RandomAgent
 
@@ -66,10 +110,7 @@ def run(config: Config, agents: list[Agent]) -> State:
 
     # Create the state
     grid = cxf.create_grid(shape)
-    time = 0
-    active = 0
-
-    # Create the actions
+    time, active = 0, 0
     actions = cxf.generate_actions(grid)
 
     while not cxf.terminal(grid, k):
@@ -85,46 +126,22 @@ def run(config: Config, agents: list[Agent]) -> State:
         # Generate valid actions
         actions = cxf.generate_actions(grid)
 
-    return {"grid": grid, "active": active, "time": time}
+    return {"grid": grid, "info": {"active": active, "time": time}}
 ```
 
-**Class**:
+More examples are in the [recipes](./recipes) directory.
 
-```{python3}
-from connectx.types import Config, State
-from connectx.game import Game
+## Configuration
 
-from agents.types import Agent
-from agents import RandomAgent
+Games are defined by a config with three fields:
 
+| Option    | Type           | Description                                    |
+| --------- | -------------- | ---------------------------------------------- |
+| `shape`   | `(rows, cols)` | Board dimensions; both must be &gt; 0.         |
+| `k`       | `int`          | Line length to win; must be ≤ max(rows, cols). |
+| `players` | `list[int]`    | Player IDs; at least two distinct values.      |
 
-def run(config: Config, agents: list[Agent]) -> State:
-    game = Game(config)
-    state, actions = game.start()
-
-    while not game.terminal():
-        # Render the current state
-        game.render()
-        # Select action
-        action = agents[state["info"]["active"]].select(state, actions)
-        print(f"Action: {action}")
-        # Execute action and update state
-        state, actions = game.transition(action)
-
-    return state
-```
-
-More examples on how to use the project can be found under the `/recipes` directory.
-
-## Configuration Options
-
-The base version of this project provides three configuration options to define a game:
-
-1. `shape: tuple[int, int]`: The shape of the game board. Requirement: `shape[0] > 0, shape[1] > 0`.
-2. `k: int`: The length of the line to win the game. Requirement: `k < max(shape[0], shape[1])`.
-3. `players: list[int]`: The number and identity of each player. Requirement: `len(players) > 1` and that there are at least two unique values in `players`.
-
-These are used to define a simple game, however, one can extend these to allow for more interesting variants.
+Example: classic Connect 4 is `shape=(6, 7)`, `k=4`, `players=[1, 2]`.
 
 ## Extensions
 

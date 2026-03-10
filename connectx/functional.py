@@ -11,13 +11,14 @@ def create_grid(shape: Shape) -> Grid:
 
 @nb.njit(nb.uint8[:, :](nb.uint8[:, :], nb.uint8, nb.uint8))
 def place_token(grid: Grid, token: np.uint8, action: Action) -> Grid:
-    for row in range(grid.shape[0]):
-        if grid[row][action] != 0:
-            grid[row - 1][action] = token
+    out = np.copy(grid)
+    for row in range(out.shape[0]):
+        if out[row][action] != 0:
+            out[row - 1][action] = token
             break
     else:
-        grid[grid.shape[0] - 1][action] = token
-    return grid
+        out[out.shape[0] - 1][action] = token
+    return out
 
 
 @nb.njit(nb.uint8[:](nb.uint8[:, :]))
