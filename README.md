@@ -18,6 +18,23 @@ This creates a universe of environments that have fundamentally similarities and
 - **Pluggable agents** — Simple `Agent` protocol; ship a random agent and add your own.
 - **Utilities** — State serialization, terminal rendering, and helpers for training loops.
 
+## Architecture
+
+The project is built in three layers:
+
+1. **Config & types** (`connectx.types`) — Game parameters (board shape, win length `k`, player IDs) and shared types for grids, state, and actions. All APIs consume and produce these types.
+
+2. **Core engine** — Two ways to run the game:
+   - **Functional** (`connectx.functional`): Pure, JIT-compiled functions — `create_grid`, `place_token`, `generate_actions`, `terminal`. No hidden state; you hold the grid and call these in a loop. Best for custom training loops and numba-heavy pipelines.
+   - **Class-based** (`connectx.game.Game`): Stateful wrapper that holds grid, current player, and time. You call `start()`, then `transition(action)` until `terminal()`. Built on top of the same functional primitives.
+
+3. **Agents** (`agents`) — Implement the `Agent` protocol (`select(state, actions) -> action`). The engine never imports agent logic; you pass in a list of agents and the runner asks the current agent for a move. That keeps the environment agnostic to how decisions are made (random, heuristic, or learned).
+
+```
+Config ──► [ functional (create_grid, place_token, generate_actions, terminal) ]
+     ──► [ Game (start, transition, terminal) ] ──► Agent.select(state, actions) ──► action
+```
+
 ## Installation
 
 Requires **Python 3.10+**. Requirements are in [requirements.txt](./requirements.txt); you can also install the project (and optional test deps) with `pip install -e ".[test]"` from the repo root. Use a virtual environment.
@@ -59,6 +76,12 @@ Or use the recipes:
 ```bash
 python recipes/class_example.py
 python recipes/functional_example.py
+```
+
+To run a **benchmark** (generate_actions and transition timings for various board dimensions):
+
+```bash
+python scripts/benchmark.py
 ```
 
 ## Usage
