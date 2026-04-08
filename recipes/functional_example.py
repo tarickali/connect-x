@@ -27,7 +27,7 @@ def run(config: Config, agents: list[Agent]) -> State:
         # Execute action and update state
         grid = cxf.place_token(grid, players[active], action)
         time += 1
-        active = time % 2
+        active = time % len(players)
         # Generate valid actions
         actions = cxf.generate_actions(grid)
 

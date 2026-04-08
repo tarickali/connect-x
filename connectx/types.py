@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import TypedDict, List
 
 import numpy as np
 import numpy.typing as npt
@@ -11,7 +11,7 @@ Shape = tuple[np.uint8, np.uint8]
 class Config(TypedDict):
     shape: Shape
     k: int
-    players: list
+    players: List[int]
 
 
 Grid = npt.NDArray[np.uint8]

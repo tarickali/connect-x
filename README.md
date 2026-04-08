@@ -145,12 +145,14 @@ def run(config: Config, agents: list[Agent]) -> State:
         # Execute action and update state
         grid = cxf.place_token(grid, players[active], action)
         time += 1
-        active = time % 2
+        active = time % len(players)
         # Generate valid actions
         actions = cxf.generate_actions(grid)
 
     return {"grid": grid, "info": {"active": active, "time": time}}
 ```
+
+Provide one agent per player (same length as `config["players"]`). **Note:** `MinimaxAgent` supports only two-player games for now; use `RandomAgent` or custom agents for more players.
 
 More examples are in the [recipes](./recipes) directory.
 

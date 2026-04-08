@@ -30,6 +30,22 @@ def generate_actions(grid: Grid) -> Actions:
     return actions
 
 
+@nb.njit(nb.int64[:](nb.uint8[:]))
+def valid_action_columns(actions: Actions) -> np.ndarray:
+    n = actions.shape[0]
+    count = 0
+    for i in range(n):
+        if actions[i] == 1:
+            count += 1
+    out = np.empty(count, dtype=np.int64)
+    j = 0
+    for i in range(n):
+        if actions[i] == 1:
+            out[j] = i
+            j += 1
+    return out
+
+
 @nb.njit(nb.boolean(nb.uint8[:]))
 def check_line(line: np.ndarray) -> bool:
     return line[0] != 0 and np.min(line) == np.max(line)

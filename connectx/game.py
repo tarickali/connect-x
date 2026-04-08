@@ -1,4 +1,5 @@
-from typing import Optional
+from typing import Optional, Any
+
 from connectx.types import Config, Grid, Info, Action, Actions, State
 import connectx.functional as cxf
 from connectx.renderer import terminal_render as render
@@ -28,7 +29,7 @@ class Game:
         self._grid = cxf.place_token(self._grid, token, action)
 
         self._info["time"] += 1
-        self._info["active"] = self._info["time"] % 2
+        self._info["active"] = self._info["time"] % len(self._config["players"])
 
         self._actions = cxf.generate_actions(self._grid)
 
@@ -43,6 +44,34 @@ class Game:
             self._info["time"],
             self._config["players"][self._info["active"]],
         )
+
+    def report(self) -> dict[str, Any]:
+        steps = self._info["time"]
+
+        # Not terminal yet
+        if not self.terminal():
+            return {
+                "winner": None,
+                "steps": steps,
+                "tie": False,
+            }
+
+        is_tie = cxf.check_tie(self._grid)
+        if is_tie:
+            return {
+                "winner": None,
+                "steps": steps,
+                "tie": True,
+            }
+
+        winner_id = (steps - 1) % len(self._config["players"])
+        winner_token = self._config["players"][winner_id]
+
+        return {
+            "winner": {"token": winner_token, "id": winner_id},
+            "steps": steps,
+            "tie": False,
+        }
 
     @property
     def state(self) -> State:
