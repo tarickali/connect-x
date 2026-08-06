@@ -1,9 +1,20 @@
-from typing import TypedDict, List
+from typing import List, Optional, TypedDict
 
 import numpy as np
 import numpy.typing as npt
 
-__all__ = ["Shape", "Config", "Grid", "Info", "State", "Action", "Actions", "Instance"]
+__all__ = [
+    "Shape",
+    "Config",
+    "Grid",
+    "Info",
+    "State",
+    "Action",
+    "Actions",
+    "Instance",
+    "WinnerInfo",
+    "Report",
+]
 
 Shape = tuple[np.uint8, np.uint8]
 
@@ -35,3 +46,14 @@ class Instance(TypedDict):
     grid: Grid
     info: Info
     config: Config
+
+
+class WinnerInfo(TypedDict):
+    token: int
+    id: int
+
+
+class Report(TypedDict):
+    winner: Optional[WinnerInfo]
+    steps: int
+    tie: bool
