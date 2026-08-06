@@ -5,7 +5,7 @@ from agents.types import Agent
 from agents import RandomAgent
 
 
-def run(config: Config, agents: list[Agent]) -> State:
+def run(config: Config, agents: list[Agent]) -> tuple[State, dict]:
     game = Game(config)
     state, actions = game.start()
 
@@ -18,7 +18,7 @@ def run(config: Config, agents: list[Agent]) -> State:
         # Execute action and update state
         state, actions = game.transition(action)
 
-    return state
+    return state, game.report()
 
 
 if __name__ == "__main__":
@@ -26,5 +26,6 @@ if __name__ == "__main__":
 
     agents = [RandomAgent(), RandomAgent()]
 
-    report = run(config, agents)
-    print(report)
+    final_state, report = run(config, agents)
+    print("Final state:", final_state)
+    print("Report:", report)

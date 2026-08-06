@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from connectx import Game
 from connectx.types import Config
@@ -77,6 +78,67 @@ class TestGameTerminal:
             expected_active = moves % n_players
             assert state["info"]["active"] == expected_active
         assert game.terminal()
+
+
+class TestGameIllegalMove:
+    def test_illegal_column_raises(self, default_config: Config) -> None:
+        game = Game(default_config)
+        game.start()
+        rows = int(default_config["shape"][0])
+        for _ in range(rows):
+            game.transition(0)
+        assert game.actions[0] == 0
+        with pytest.raises(ValueError):
+            game.transition(0)
+
+
+class TestGameReport:
+    def test_not_terminal(self, default_config: Config) -> None:
+        game = Game(default_config)
+        game.start()
+        r = game.report()
+        assert r["winner"] is None
+        assert r["tie"] is False
+        assert r["steps"] == 0
+
+
+class TestGameUndo:
+    def test_undo_restores_grid(self, default_config: Config) -> None:
+        game = Game(default_config, undo=True)
+        game.start()
+        before = np.copy(game.state["grid"])
+        game.transition(0)
+        assert game.undo()
+        np.testing.assert_array_equal(game.state["grid"], before)
+
+    def test_undo_pops_trajectory(self, default_config: Config) -> None:
+        game = Game(default_config, undo=True, record=True)
+        game.start()
+        game.transition(0)
+        assert len(game.trajectory().steps) == 1
+        assert game.undo()
+        assert len(game.trajectory().steps) == 0
+
+
+class TestGameFork:
+    def test_fork_parent_unchanged(self, default_config: Config) -> None:
+        game = Game(default_config)
+        game.start()
+        initial = np.copy(game.state["grid"])
+        child = game.fork()
+        child.transition(0)
+        np.testing.assert_array_equal(game.state["grid"], initial)
+
+
+class TestGameTrajectory:
+    def test_records_steps(self, default_config: Config) -> None:
+        game = Game(default_config, record=True)
+        game.start()
+        game.transition(0)
+        tr = game.trajectory()
+        assert len(tr.steps) == 1
+        assert tr.steps[0].action == 0
+        assert tr.steps[0].terminal_after == game.terminal()
 
 
 class TestGameMultiPlayer:

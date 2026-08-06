@@ -1,6 +1,6 @@
 # Todo List
 
-- [ ] Add benchmark suite
+- [x] Add benchmark suite
 - [ ] Allows for parallel environments.
 - [ ] Optional ASCII and PyGame rendering.
 - [ ] Recording games
