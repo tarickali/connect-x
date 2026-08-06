@@ -41,6 +41,15 @@ class TestPlaceToken:
         cxf.place_token(grid, 1, 0)
         np.testing.assert_array_equal(grid, original)
 
+    def test_full_column_is_no_op(self, default_config: Config) -> None:
+        shape = default_config["shape"]
+        grid = cxf.create_grid(shape)
+        for _ in range(shape[0]):
+            grid = cxf.place_token(grid, 1, 0)
+        before = np.copy(grid)
+        after = cxf.place_token(grid, 1, 0)
+        np.testing.assert_array_equal(after, before)
+
 
 class TestGenerateActions:
     def test_empty_grid_all_columns_valid(self, default_config: Config) -> None:

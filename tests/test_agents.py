@@ -67,3 +67,12 @@ class TestMinimaxAgent:
         agent = MinimaxAgent(config=config, depth=3)
         action = int(agent.select(state, actions))
         assert action == 3  # block opponent's connect-4
+
+    def test_depth_uses_evaluate(self) -> None:
+        config = self._default_config()
+        grid = np.zeros(config["shape"], dtype=np.uint8)
+        actions = np.ones(config["shape"][1], dtype=np.uint8)
+        state = make_state(grid, time=0, active=0)
+        agent = MinimaxAgent(config=config, depth=1)
+        action = int(agent.select(state, actions))
+        assert 0 <= action < config["shape"][1]

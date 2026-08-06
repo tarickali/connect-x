@@ -1,8 +1,6 @@
-import math
-
 import numpy as np
 
-from connectx.types import State, Actions, Action, Config, Grid
+from connectx.types import Action, Actions, Config, Grid, State
 import connectx.functional as cxf
 
 __all__ = ["MinimaxAgent"]
@@ -19,11 +17,11 @@ class MinimaxAgent:
 
         valid_cols = cxf.valid_action_columns(actions)
         if valid_cols.size == 0:
-            # No valid actions; fall back to column 0 (should not happen in normal play).
             return np.uint8(0)
 
         players = self.config["players"]
-        assert len(players) == 2, "MinimaxAgent currently supports exactly two players."
+        if len(players) != 2:
+            raise ValueError("MinimaxAgent currently supports exactly two players.")
 
         active_index = info["active"]
         max_token = np.uint8(players[active_index])
@@ -57,13 +55,13 @@ class MinimaxAgent:
         maximizing_token: int,
     ) -> float:
         if cxf.terminal(grid, self.config["k"]):
-            if not cxf.check_tie(grid):
+            if cxf.check_tie(grid):
                 return 0.0
-
-            if other_token == maximizing_token:
+            # Last move was by other_token (next to move is current_token).
+            winner = other_token
+            if int(winner) == int(maximizing_token):
                 return float("inf")
-            else:
-                return float("-inf")
+            return float("-inf")
 
         if depth == 0:
             return self.evaluate(grid, maximizing_token, other_token)
@@ -71,14 +69,13 @@ class MinimaxAgent:
         actions = cxf.generate_actions(grid)
         valid_cols = cxf.valid_action_columns(actions)
         if valid_cols.size == 0:
-            # No moves but not marked terminal: treat as neutral.
             return 0.0
 
-        current_token_maximizing = current_token == maximizing_token
+        current_token_maximizing = int(current_token) == int(maximizing_token)
         best = float("-inf") if current_token_maximizing else float("inf")
         for col in valid_cols:
             col_int = int(col)
-            child = cxf.place_token(grid, current_token, np.uint8(col_int))
+            child = cxf.place_token(grid, np.uint8(current_token), np.uint8(col_int))
             score = self.minimax(
                 child,
                 depth=depth - 1,
@@ -100,11 +97,8 @@ class MinimaxAgent:
         k = self.config["k"]
         max_token, min_token = int(maximizing_token), int(minimizing_token)
 
-        # 1. Center column prefence
-        # Rationale: middle columns are stronger
         center_col = cols // 2
         for c in range(cols):
-            # Weight function: 1.0 + 2.0 * (distance % from center)
             weight = 1.0 + 2.0 * (1.0 - abs(c - center_col) / max(center_col, 1))
             for r in range(rows):
                 if grid[r, c] == max_token:
@@ -112,7 +106,6 @@ class MinimaxAgent:
                 elif grid[r, c] == min_token:
                     score -= weight
 
-        # 2. Row height: prefer pieces lower on the board (more stable)
         for r in range(rows):
             for c in range(cols):
                 if grid[r, c] == max_token:
@@ -120,15 +113,12 @@ class MinimaxAgent:
                 elif grid[r, c] == min_token:
                     score -= 0.5 * r
 
-        # 3. Unblocked windows of length k (threat heuristic)
-        # For each contiguous segment of length k, if it has no opponent piece it's a potential line
         score += self._score_windows(grid, k, max_token, min_token)
+        return score
 
-    ############################################################################
-    # Helper
-    ############################################################################
+    @staticmethod
     def _score_windows(grid: Grid, k: int, max_token: int, min_token: int) -> float:
-        def window_score(self, window: np.ndarray, max_t: int, min_t: int) -> float:
+        def window_score(window: np.ndarray, max_t: int, min_t: int) -> float:
             n_max = int(np.sum(window == max_t))
             n_min = int(np.sum(window == min_t))
             if n_max > 0 and n_min > 0:

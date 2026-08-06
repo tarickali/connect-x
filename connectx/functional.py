@@ -12,6 +12,9 @@ def create_grid(shape: Shape) -> Grid:
 @nb.njit(nb.uint8[:, :](nb.uint8[:, :], nb.uint8, nb.uint8))
 def place_token(grid: Grid, token: np.uint8, action: Action) -> Grid:
     out = np.copy(grid)
+    # Top row occupied => column is full; avoid negative indexing into row -1.
+    if out.shape[0] > 0 and out[0, action] != 0:
+        return out
     for row in range(out.shape[0]):
         if out[row][action] != 0:
             out[row - 1][action] = token
