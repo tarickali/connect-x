@@ -1,43 +1,55 @@
-from connectx.types import Config, State
+"""Functional API: hold the grid yourself and call the JIT primitives.
+
+Best for custom training loops and numba-heavy pipelines, where you do not want
+an object owning the state. Note the explicit ``is_legal`` guard: unlike
+:class:`connectx.Game`, the functional layer will not raise on an illegal
+column, so the loop has to check before it advances the clock.
+
+Run with ``python recipes/functional_example.py``.
+"""
+
+import numpy as np
+
 import connectx.functional as cxf
-from connectx.utils import make_state
-from connectx.renderer import terminal_render as render
-
+from agents import RandomAgent, agent_reset
 from agents.types import Agent
-from agents import RandomAgent
+from connectx import preset
+from connectx.renderer import terminal_render as render
+from connectx.types import Config, State
+from connectx.utils import make_state
 
 
-def run(config: Config, agents: list[Agent]) -> State:
+def run(config: Config, agents: list[Agent], render_board: bool = True) -> State:
     shape, k, players = config["shape"], config["k"], config["players"]
+    for agent in agents:
+        agent_reset(agent, config)
 
-    # Create the state
     grid = cxf.create_grid(shape)
-    time = 0
-    active = 0
-
-    # Create the actions
+    time, active = 0, 0
     actions = cxf.generate_actions(grid)
 
     while not cxf.terminal(grid, k):
-        # Render the current state
-        render(grid, time, players[active])
-        # Select action
+        if render_board:
+            render(grid, time, players[active], k=k, players=players)
+
         action = agents[active].select(make_state(grid, time, active), actions)
-        print(f"Action: {action}")
-        # Execute action and update state
-        grid = cxf.place_token(grid, players[active], action)
+        if not cxf.is_legal(grid, action):
+            raise ValueError(f"agent {active} chose illegal column {action}")
+
+        grid = cxf.place_token(grid, np.uint8(players[active]), action)
         time += 1
         active = time % len(players)
-        # Generate valid actions
         actions = cxf.generate_actions(grid)
 
-    return {"grid": grid, "info": {"active": active, "time": time}}
+    if render_board:
+        render(grid, time, players[active], k=k, players=players)
+    return make_state(grid, time, active)
 
 
 if __name__ == "__main__":
-    config: Config = {"shape": (6, 7), "k": 4, "players": [1, 2]}
+    config = preset("connect4")
+    agents = [RandomAgent(seed=0), RandomAgent(seed=1)]
 
-    agents = [RandomAgent(), RandomAgent()]
-
-    report = run(config, agents)
-    print(report)
+    final_state = run(config, agents)
+    token = int(cxf.winner(final_state["grid"], config["k"]))
+    print("Winner token:", token or "draw")
