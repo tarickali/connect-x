@@ -1,31 +1,16 @@
-from connectx.types import Config, State
-from connectx.game import Game
+"""Entry point for `python main.py` — delegates to the connectx CLI.
 
-from agents.types import Agent
-from agents import RandomAgent
+Kept so a clean checkout has something obvious to run before installing.
+`python main.py` with no arguments plays one random-vs-random game; anything
+else is passed straight through, so `python main.py match --help` works too.
 
+The runnable examples live in `recipes/`; see USAGE.md for every command.
+"""
 
-def run(config: Config, agents: list[Agent]) -> tuple[State, dict]:
-    game = Game(config)
-    state, actions = game.start()
+import sys
 
-    while not game.terminal():
-        # Render the current state
-        game.render()
-        # Select action
-        action = agents[state["info"]["active"]].select(state, actions)
-        print(f"Action: {action}")
-        # Execute action and update state
-        state, actions = game.transition(action)
-
-    return state, game.report()
-
+from connectx.cli import main
 
 if __name__ == "__main__":
-    config: Config = {"shape": (6, 7), "k": 4, "players": [1, 2]}
-
-    agents = [RandomAgent(), RandomAgent()]
-
-    final_state, report = run(config, agents)
-    print("Final state:", final_state)
-    print("Report:", report)
+    argv = sys.argv[1:] or ["play", "--preset", "connect4", "--agents", "random", "random"]
+    raise SystemExit(main(argv))

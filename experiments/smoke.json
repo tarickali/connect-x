@@ -1,0 +1,12 @@
+{
+  "name": "smoke",
+  "agents": ["greedy", "random"],
+  "games": 10,
+  "seed": 0,
+  "workers": 1,
+  "variants": {
+    "shapes": [[4, 5], [5, 6]],
+    "ks": [3],
+    "player_counts": [2]
+  }
+}
