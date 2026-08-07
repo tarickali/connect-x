@@ -1,2 +1,8 @@
-numpy==1.26
-numba==0.60.0
+# Runtime dependencies, mirroring pyproject.toml.
+# Prefer `pip install -e ".[dev]"`, which reads pyproject.toml directly and
+# also pulls in the test, RL-adapter, and lint tooling.
+#
+# numpy is deliberately unpinned here: numba declares its own compatible numpy
+# range, and pinning both is how the two files ended up contradicting.
+numpy>=1.24
+numba>=0.59

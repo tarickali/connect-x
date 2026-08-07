@@ -4,26 +4,94 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "connect-x"
-version = "0.1.0"
-description = "A general implementation of Connect-based games to train and test AI agents."
+version = "0.2.0"
+description = "Parameterized Connect-style games for training and evaluating AI agents."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-dependencies = [
-    "numpy>=1.26",
-    "numba>=0.60.0",
+authors = [{ name = "Tarick Ali" }]
+keywords = ["reinforcement-learning", "games", "connect-four", "mnk-game", "benchmark"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-[project.optional-dependencies]
-test = [
-    "pytest>=7.0",
+# numba pins its own compatible numpy range, so we only set floors here and let
+# the resolver pick a working pair. Pinning numpy independently is what made
+# the two files disagree previously.
+dependencies = [
+    "numpy>=1.24",
+    "numba>=0.59",
 ]
+
+[project.urls]
+Homepage = "https://github.com/tarickali/connect-x"
+Repository = "https://github.com/tarickali/connect-x"
+Issues = "https://github.com/tarickali/connect-x/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-cov>=4.0"]
+rl = ["gymnasium>=0.29", "pettingzoo>=1.24"]
+dev = [
+    "connect-x[test,rl]",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+connectx = "connectx.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["connectx*", "agents*"]
 
+[tool.setuptools.package-data]
+connectx = ["py.typed"]
+agents = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-v"
+addopts = "-q"
+markers = [
+    "slow: deselect with -m 'not slow'",
+    "rl: needs the optional [rl] extra (gymnasium, pettingzoo)",
+]
+
+[tool.coverage.run]
+source = ["connectx", "agents"]
+omit = ["*/__main__.py"]
+
+[tool.ruff]
+line-length = 90
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = [
+    "E501",  # long lines are handled by the formatter
+    "B008",  # default RewardSpec() args are immutable NamedTuples
+]
+
+[tool.ruff.lint.per-file-ignores]
+"connectx/functional.py" = ["E741"]
+"tests/*" = ["B011"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["connectx", "agents"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+no_implicit_optional = true
+disable_error_code = ["annotation-unchecked"]
+
+[[tool.mypy.overrides]]
+module = ["numba", "numba.*"]
+ignore_missing_imports = true
