@@ -1,187 +1,223 @@
 # connect-x
 
-A **general, parameterized implementation of Connect-based games** for training and evaluating AI agents. Built for research and experimentation in agent generalization across task variants.
+[![CI](https://github.com/tarickali/connect-x/actions/workflows/ci.yml/badge.svg)](https://github.com/tarickali/connect-x/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.13-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
-## Overview
+A **parameterized family of Connect-style games** for training and evaluating AI
+agents, built to measure how well an agent generalizes when the task changes
+underneath it.
 
-In order to push the boundaries of AI research in the pursuit of creating more intelligently capable agents, we need rich and complex environments to train and evaluate them. Although there already exist many research environments that provide interesting and difficult tasks from a wide range of domains, there are only a few projects that provide environments cater made to test the ability of an agent to generalize across task domains. This project is meant to help fill that gap.
+Board shape, win length `k`, and player count are all configuration. That turns
+a single game into a universe of related ones — and makes the interesting
+question askable: *does an agent that is strong on 6x7 stay strong on 9x10, or
+with five in a row, or with three players?*
 
-Although Connect 4 is a relatively simple game that even children can learn and master, it nevertheless provides a rich and intellectually stimulating environment to train and evaluate agents on. However, since we wish to evaluate the ability of agents to generalize across task domains, having agents train only on Connect 4 would not be sufficient. Instead, we extend the game of Connect 4 to a more general version known as `connectx`, where one can configure the game parameters to quickly make different games.
+```bash
+pip install -e ".[dev]"
+connectx tournament --preset connect4 --agents random greedy mcts minimax:depth=4
+connectx sweep --agents minimax:depth=4 greedy --shapes 5x6 6x7 9x10 --ks 3 4 5
+```
 
-This creates a universe of environments that have fundamentally similarities and can serve as a stepping stone to build generally capable game-playing agents.
+---
+
+## Why this exists
+
+Agent benchmarks tend to measure competence on one fixed task. Generalization
+research needs the opposite: a family of tasks that share structure but differ
+in ways you control. Connect 4 is a good base — simple enough to reason about,
+deep enough to be non-trivial — and it sits inside the well-studied family of
+*m,n,k-games*, so widening it is principled rather than arbitrary.
+
+The measurement machinery is treated as part of the library, not as scripts
+bolted on afterwards: seat rotation, seeded reproducibility, confidence
+intervals, and variant sweeps are first-class.
+
+---
+
+## What generalization looks like here
+
+`minimax:depth=4` versus `greedy`, 60 games per variant, seats rotated:
+
+| variant | score | 95% CI |
+| --- | --- | --- |
+| 5x6 k=3 | 63.3% | [50.7%, 74.4%] |
+| 6x7 k=3 | 100.0% | [94.0%, 100.0%] |
+| 6x7 k=4 | 95.8% | [87.5%, 98.7%] |
+| 9x10 k=3 | 83.3% | [72.0%, 90.7%] |
+| 9x10 k=5 | 100.0% | [94.0%, 100.0%] |
+| **mean over 12 variants** | **93.4%** | spread **36.7%** |
+
+The same agent, unchanged, ranges from 63% to 100% depending only on the board.
+A single-variant benchmark would report one of those numbers and call it the
+answer. Reproduce with:
+
+```bash
+python scripts/experiment.py experiments/ladder.json
+```
+
+---
 
 ## Features
 
-- **Parameterized games** — Board shape, win length `k`, and player set via a single config.
-- **Two APIs** — Functional (pure, numpy/numba-friendly) and class-based `Game` for different workflows.
-- **Numba-optimized core** — Grid operations and win detection compiled for speed.
-- **Pluggable agents** — Simple `Agent` protocol; ship a random agent and add your own.
-- **Utilities** — State serialization, terminal rendering, and helpers for training loops.
+- **Variants as configuration** — board shape, win length `k`, and player count,
+  validated so an unwinnable game is rejected rather than silently played.
+- **Two APIs** — pure JIT-compiled functions for custom training loops, and a
+  stateful `Game` for scripting. Both back onto the same primitives.
+- **Fast** — incremental win detection makes `terminal()` O(1) after an O(k)
+  update; batched `VecGame` reaches **6.5M moves/second**.
+- **RL-ready** — per-seat rewards, seeded determinism, perspective-relative
+  observation planes, action masks, mirror augmentation, trajectory recording.
+- **Standard APIs** — PettingZoo (AEC) and Gymnasium adapters, both passing
+  their upstream conformance tests.
+- **An agent ladder** — random → greedy → alpha-beta minimax → UCT MCTS, so a
+  win rate means something.
+- **A measurement harness** — matches with Wilson intervals, round-robin
+  tournaments with Elo, variant sweeps, JSONL results, process parallelism.
 
-## Architecture
+---
 
-The project is built in three layers:
+## Install
 
-1. **Config & types** (`connectx.types`) — Game parameters (board shape, win length `k`, player IDs) and shared types for grids, state, and actions. All APIs consume and produce these types.
-
-2. **Core engine** — Two ways to run the game:
-   - **Functional** (`connectx.functional`): Pure, JIT-compiled functions — `create_grid`, `place_token`, `generate_actions`, `terminal`. No hidden state; you hold the grid and call these in a loop. Best for custom training loops and numba-heavy pipelines.
-   - **Class-based** (`connectx.game.Game`): Stateful wrapper that holds grid, current player, and time. You call `start()`, then `transition(action)` until `terminal()`. Built on top of the same functional primitives.
-
-3. **Agents** (`agents`) — Implement the `Agent` protocol (`select(state, actions) -> action`). The engine never imports agent logic; you pass in a list of agents and the runner asks the current agent for a move. That keeps the environment agnostic to how decisions are made (random, heuristic, or learned).
-
-```
-Config ──► [ functional (create_grid, place_token, generate_actions, terminal) ]
-     ──► [ Game (start, transition, terminal) ] ──► Agent.select(state, actions) ──► action
-```
-
-## Installation
-
-Requires **Python 3.10+**. Requirements are in [requirements.txt](./requirements.txt); you can also install the project (and optional test deps) with `pip install -e ".[test]"` from the repo root. Use a virtual environment.
-
-1. **Clone the repository**
+Python 3.10+.
 
 ```bash
 git clone https://github.com/tarickali/connect-x.git
 cd connect-x
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"        # or ".[rl]" for just the RL adapters
 ```
 
-2. **Create a virtual environment and install dependencies**
+Full command reference: **[USAGE.md](USAGE.md)**.
 
-```bash
-# Option 1: venv
-python -m venv .venv
-source .venv/bin/activate   # On Windows: .venv\Scripts\activate
+---
 
-# Option 2: conda
-conda create -n connectx python=3.10
-conda activate connectx
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-To run tests: `pip install -e ".[test]"` then `pytest`.
-
-## Quick Start
-
-Run two random agents against each other (class API):
-
-```bash
-python main.py
-```
-
-Or use the recipes:
-
-```bash
-python recipes/class_example.py
-python recipes/functional_example.py
-```
-
-To run a **benchmark** (generate_actions and transition timings for various board dimensions):
-
-```bash
-python scripts/benchmark.py
-```
-
-## Usage
-
-You can use either a **functional API** (good for custom training loops and numba) or a **class-based API** (good for scripting and encapsulation).
-
-### Class-based API
+## Quick start
 
 ```python
-from connectx import Config, Game
-from connectx.types import State
-from agents import RandomAgent
-from agents.types import Agent
+from connectx import Game, preset
+from agents import make_agent
 
+config = preset("connect4")                       # or make_config((9, 10), 5, [1, 2, 3])
+agents = [make_agent("minimax:depth=6", config, seed=0),
+          make_agent("mcts:simulations=800", config, seed=1)]
 
-def run(config: Config, agents: list[Agent]) -> State:
-    game = Game(config)
-    state, actions = game.start()
+game = Game(config)
+state, actions = game.start()
+while not game.terminal():
+    action = agents[state["info"]["active"]].select(state, actions)
+    result = game.step(action)                    # rewards + terminated included
+    state, actions = result.state, result.actions
 
-    while not game.terminal():
-        game.render()
-        action = agents[state["info"]["active"]].select(state, actions)
-        print(f"Action: {action}")
-        state, actions = game.transition(action)
-
-    return state
-
-
-if __name__ == "__main__":
-    config: Config = {"shape": (6, 7), "k": 4, "players": [1, 2]}
-    agents = [RandomAgent(), RandomAgent()]
-    final_state = run(config, agents)
-    print(final_state)
+game.render()
+print(game.report())      # {'winner': {'token': 1, 'id': 0}, 'steps': 31, 'tie': False}
+print(game.rewards())     # array([ 1., -1.])
 ```
 
-### Functional API
+Train against the standard APIs:
 
 ```python
-from connectx.types import Config, State
-import connectx.functional as cxf
-from connectx.utils import make_state
-from connectx.renderer import terminal_render as render
-from agents.types import Agent
-from agents import RandomAgent
+from connectx.adapters import make_aec_env, make_gym_env
 
-
-def run(config: Config, agents: list[Agent]) -> State:
-    shape, k, players = config["shape"], config["k"], config["players"]
-
-    # Create the state
-    grid = cxf.create_grid(shape)
-    time, active = 0, 0
-    actions = cxf.generate_actions(grid)
-
-    while not cxf.terminal(grid, k):
-        # Render the current state
-        render(grid, time, players[active])
-        # Select action
-        action = agents[active].select(make_state(grid, time, active), actions)
-        print(f"Action: {action}")
-        # Execute action and update state
-        grid = cxf.place_token(grid, players[active], action)
-        time += 1
-        active = time % len(players)
-        # Generate valid actions
-        actions = cxf.generate_actions(grid)
-
-    return {"grid": grid, "info": {"active": active, "time": time}}
+env = make_aec_env(config)                                    # PettingZoo, self-play
+env = make_gym_env(config, opponent="minimax:depth=4")        # Gymnasium, single agent
 ```
 
-Provide one agent per player (same length as `config["players"]`). **Note:** `MinimaxAgent` supports only two-player games for now; use `RandomAgent` or custom agents for more players.
+---
 
-More examples are in the [recipes](./recipes) directory.
+## Architecture
+
+```
+config  ──►  functional  ──►  Game  ──►  VecGame        (engine)
+   │         (numba)          │
+   │                          ├──►  Trajectory ──► dataset      (data)
+   │                          ├──►  encoding             (observations)
+   │                          └──►  adapters        (PettingZoo / Gymnasium)
+   │
+   └──►  variants ──► arena ──► Elo, Wilson intervals, JSONL    (measurement)
+
+agents: Agent protocol ──► random │ greedy │ minimax │ mcts │ human
+```
+
+| Layer | Module | Responsibility |
+| --- | --- | --- |
+| Config | `connectx.config` | Variants, validation, presets |
+| Core | `connectx.functional` | Pure JIT primitives; no hidden state |
+| Engine | `connectx.game` | Stateful `Game`; undo, fork, record, rewards |
+| Protocol | `connectx.engine` | `GameEngine` — implement it to add a new game |
+| Batch | `connectx.vector` | `VecGame`, N boards in one kernel |
+| Data | `connectx.trajectory`, `connectx.dataset` | Episodes, replay, dataset shards |
+| Learning | `connectx.encoding` | Planes, masks, mirror symmetry |
+| Bridges | `connectx.adapters` | PettingZoo AEC, Gymnasium |
+| Measurement | `connectx.arena`, `connectx.variants` | Matches, tournaments, sweeps |
+| Agents | `agents` | Baseline ladder + registry |
+
+The engine never imports agent code, and agents never import the harness — so a
+new game, a new agent, and a new experiment are three independent changes.
+
+---
+
+## Performance
+
+Apple M-series, single core, numba warm. Reproduce with `connectx bench`.
+
+| Operation | 6x7 | 20x20 | 60x60 |
+| --- | --- | --- | --- |
+| `winner_at` (incremental) | 0.15 µs | 0.15 µs | 0.15 µs |
+| `winner` (full scan) | 0.22 µs | 0.35 µs | 1.98 µs |
+| `Game.transition` | 4.3 µs | 4.1 µs | 4.7 µs |
+
+Win detection is incremental — only the four lines through the cell just filled
+are examined — so `terminal()` costs the same on a 60x60 board as on a 6x7 one.
+
+| Environment | Moves/second |
+| --- | --- |
+| `Game` (scalar) | 232,000 |
+| `VecGame`, 256 envs | 3,748,000 |
+| `VecGame`, 2048 envs | 6,487,000 |
+
+| Agent | ms per move (cold) |
+| --- | --- |
+| `random` | 0.002 |
+| `greedy` | 0.023 |
+| `minimax:depth=4` | 0.313 |
+| `mcts:simulations=200` | 3.202 |
+
+---
 
 ## Configuration
 
-Games are defined by a config with three fields:
+| Option | Type | Rule |
+| --- | --- | --- |
+| `shape` | `(rows, cols)` | Both positive; no upper bound |
+| `k` | `int` | `1 <= k <= max(rows, cols)`, so a win can fit |
+| `players` | `list[int]` | ≥ 2 distinct tokens in `1..255` (`0` marks empty) |
 
-| Option    | Type           | Description                                    |
-| --------- | -------------- | ---------------------------------------------- |
-| `shape`   | `(rows, cols)` | Board dimensions; both must be &gt; 0.         |
-| `k`       | `int`          | Line length to win; must be ≤ max(rows, cols). |
-| `players` | `list[int]`    | Player IDs; at least two distinct values.      |
+Classic Connect 4 is `shape=(6, 7)`, `k=4`, `players=[1, 2]`. Presets: `tiny`,
+`small`, `connect4`, `connect5`, `wide`, `tall`, `three-player`, `four-player`.
 
-Example: classic Connect 4 is `shape=(6, 7)`, `k=4`, `players=[1, 2]`.
+---
 
-## Extensions
+## Extending
 
-At its current state, this project only provides an interface to create parameterized variants of Connect 4. That is, essentially the game of Connect 4 with a different sized boards and line lengths to win the game. However, Connect 4 is part of a family of games known as m,n,k-game where within this family that are different games with different transition and termination rules.
+`connectx.engine.GameEngine` is the seam. Implement it and the arena, adapters,
+recorders, and dataset tooling all work unchanged — which is how the wider
+*m,n,k* family (Gomoku, Connect6, Pente) and the Connect 4 rule variants (Pop
+Out, Pop 10, Power Up) are meant to be added.
 
-To extend this project in a meaningful way, one can use the primitives provided by this project directly or use them as inspiration to construct different types of games entirely. For example, the game of Gomuko, Connect6, Pente. Furthermore, there are even variants within Connect 4 itself with different game rules such as Pop 10, Pop Out, and Power Up.
+Adding an agent is smaller: subclass `BaseAgent`, implement `select`, register
+it. Derive variant-specific state in `reset(config)` rather than `__init__` so a
+single instance can play any variant — otherwise it cannot appear in a sweep.
 
-These provide rich environments to train agents on as well as good practice to design and build configurable versions of each new game.
+See [USAGE.md](USAGE.md#extending-the-project).
 
-## Contributions
+---
 
-Contributions are always welcome! If you have any suggestions on ways to improve or extend this project please clone the repo, implement the changes, and create a pull request.
+## Contributing
 
-If you would like to reach out to me to discuss your ideas or this project's mission in general feel free to reach out to me.
+Contributions are welcome — open an issue or a pull request. CI runs tests,
+lint, type checks, and a smoke test of every documented command.
 
 ## License
 
-This project is under the Apache License Version 2.0. For full details please refer to the [license file](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).
