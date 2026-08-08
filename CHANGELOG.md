@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `connectx surface` and `connectx.variants.tournament_surface` — a full round
+  robin on every variant, with per-variant Elo, ranks, and the spread between
+  best and worst agent. Ratings are fitted per variant and anchored to the same
+  mean, so only within-column differences are meaningful; the table says so, and
+  reports explicitly whether the ladder order is stable across variants.
+- `scripts/ablation.py` — measures whether numba earns its place, comparing the
+  shipped JIT build against both the same source uncompiled and an idiomatic
+  numpy implementation. Result: 14x on a 200-game match, 7.5x on batched
+  environments, 145x on a full-board win scan, and a tie where the work is
+  genuinely vectorizable. The whole suite passes under `NUMBA_DISABLE_JIT=1`, so
+  numba is a pure accelerator, never load-bearing.
+
+### Changed
+
+- `MCTSAgent` is ~2x faster with identical move selection. Profiling showed only
+  ~28% of a search was inside the compiled rollout; the rest was Python tree
+  overhead. Backup vectors are now precomputed per outcome in `reset` instead of
+  allocated per simulation, node statistics are Python floats rather than
+  one-element numpy operations, and expansion reuses a single legality mask.
+- Documented the numba trade-off and the generalization surface in the README.
+
 ## 0.2.0
 
 Breaking release. The engine, agent interface, and result types all changed;

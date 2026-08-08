@@ -37,24 +37,41 @@ intervals, and variant sweeps are first-class.
 
 ## What generalization looks like here
 
-`minimax:depth=4` versus `greedy`, 60 games per variant, seats rotated:
+A full round robin on twelve variants — 12 boards × 6 pairings × 40 games,
+2,880 games, seats rotated throughout. **The ladder reorders.**
 
-| variant | score | 95% CI |
-| --- | --- | --- |
-| 5x6 k=3 | 63.3% | [50.7%, 74.4%] |
-| 6x7 k=3 | 100.0% | [94.0%, 100.0%] |
-| 6x7 k=4 | 95.8% | [87.5%, 98.7%] |
-| 9x10 k=3 | 83.3% | [72.0%, 90.7%] |
-| 9x10 k=5 | 100.0% | [94.0%, 100.0%] |
-| **mean over 12 variants** | **93.4%** | spread **36.7%** |
+| agent | 5x6 k=3 | 5x6 k=4 | 6x7 k=4 | 9x10 k=5 | 12x12 k=5 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `minimax:depth=4` | 1737 | 1798 | **2033** | **2185** | **2209** |
+| `mcts:simulations=400` | **1779** | **1827** | 1883 | 1779 | 1809 |
+| `greedy` | 1623 | 1446 | 1369 | 1345 | 1316 |
+| `random` | 862 | 929 | 716 | 690 | 665 |
+| *minimax − mcts* | *−42* | *−29* | *+150* | *+406* | *+400* |
 
-The same agent, unchanged, ranges from 63% to 100% depending only on the board.
-A single-variant benchmark would report one of those numbers and call it the
-answer. Reproduce with:
+MCTS is ahead on the small boards and 400 Elo behind on the large ones. Nothing
+about either agent changed — only the board did. Pick 5x6 as your benchmark and
+you conclude MCTS is stronger; pick 12x12 and you conclude the opposite.
+
+The effect is not a compute artifact, which makes it sharper: `mcts:simulations=400`
+takes ~3.6 ms per move against minimax's ~0.32 ms, so the agent that loses on
+large boards is the one spending **11× more time**. A fixed simulation budget
+covers a vanishing fraction of a growing tree, while fixed-depth tactical search
+stays exact.
+
+The `spread` row of the full table carries a second result: the Elo range
+between best and worst agent runs from 757 (5x6 k=5) to 1544 (12x12 k=5). Some
+variants barely separate these agents at all — worth knowing before you use one
+as a benchmark.
 
 ```bash
-python scripts/experiment.py experiments/ladder.json
+connectx surface --agents random greedy minimax:depth=4 mcts:simulations=400 \
+  --shapes 5x6 6x7 9x10 12x12 --ks 3 4 5 --games 40 --workers 8
 ```
+
+Two caveats the harness makes explicit rather than hiding: ratings are fitted
+per variant and anchored to the same mean, so **only differences within a column
+mean anything**; and this is an equal-*budget* comparison, not equal-time. An
+equal-time mode is on the roadmap.
 
 ---
 
@@ -73,7 +90,8 @@ python scripts/experiment.py experiments/ladder.json
 - **An agent ladder** — random → greedy → alpha-beta minimax → UCT MCTS, so a
   win rate means something.
 - **A measurement harness** — matches with Wilson intervals, round-robin
-  tournaments with Elo, variant sweeps, JSONL results, process parallelism.
+  tournaments with Elo, variant sweeps, generalization surfaces, JSONL results,
+  process parallelism.
 
 ---
 
@@ -181,7 +199,33 @@ are examined — so `terminal()` costs the same on a 60x60 board as on a 6x7 one
 | `random` | 0.002 |
 | `greedy` | 0.023 |
 | `minimax:depth=4` | 0.313 |
-| `mcts:simulations=200` | 3.202 |
+| `mcts:simulations=200` | 1.814 |
+
+### Why numba
+
+numba is the only non-trivial dependency, so it was measured rather than
+assumed. `scripts/ablation.py` compares the shipped code against the same source
+with `NUMBA_DISABLE_JIT=1` *and* against an idiomatic vectorized numpy
+implementation — the second comparison is the honest one.
+
+| workload | numba | alternative | speedup |
+| --- | ---: | ---: | ---: |
+| 200-game match | 1.8 s | 25.1 s | **14×** |
+| `minimax:depth=4`, one move | 0.31 ms | 6.39 ms | **20×** |
+| `VecGame`, 1024 envs | 4.87M moves/s | 0.65M (numpy) | **7.5×** |
+| `winner` full scan, 6x7 | 0.28 µs | 40.4 µs (numpy) | **145×** |
+| `generate_actions`, 60x60 | 0.83 µs | 0.88 µs (numpy) | 1.07× |
+
+The pattern is consistent: numba wins where numpy cannot vectorize — scalar,
+branchy, early-exit loops. A full-board scan stops at the first line it finds;
+numpy has to materialize every window before testing any. Where the work *is* a
+clean vectorized expression, it is a tie.
+
+Cost: ~155 MB of wheels, +0.16 s on a warm import, ~2 s cold, and coupling to
+numba's supported numpy range. Worth it at 14× on the workload this project
+actually runs. **All 275 tests pass under `NUMBA_DISABLE_JIT=1`** — numba is a
+pure accelerator here, never load-bearing for behaviour, so the ablation is one
+environment variable and there is an escape hatch if it ever blocks an upgrade.
 
 ---
 

@@ -177,6 +177,45 @@ board. Shapes accept `6x7` or `6,7`. Combinations where no win fits (`k=9` on a
 variants whose seat count does not match the number of agents are skipped and
 listed.
 
+### `surface` — round robin on every variant
+
+The strongest form of the generalization measurement: instead of one matchup
+per variant, run the whole field against itself on each board and compare the
+ratings.
+
+```bash
+connectx surface --agents random greedy minimax:depth=4 mcts:simulations=400 \
+  --shapes 5x6 6x7 9x10 12x12 --ks 3 4 5 --games 40 --workers 8 \
+  --jsonl results/surface.jsonl
+```
+
+```
+agent                      5x6k3p2    6x7k4p2   9x10k5p2  12x12k5p2
+-------------------------------------------------------------------
+minimax:depth=4              1,737      2,033      2,185      2,209
+mcts:simulations=400         1,779      1,883      1,779      1,809
+greedy                       1,623      1,369      1,345      1,316
+random                         862        716        690        665
+-------------------------------------------------------------------
+spread                         917      1,317      1,495      1,544
+rank of minimax:depth=4          2          1          1          1
+
+ladder order is NOT stable across variants; moved: minimax:depth=4, mcts:simulations=400
+```
+
+Read it by column, never by row: each variant's ratings are fitted
+independently and anchored to the same mean, so an agent's absolute Elo carries
+no cross-variant meaning. What *does* transfer is the ordering, the gaps, and
+the `spread` — a small spread means the variant fails to separate these agents
+at all.
+
+The last line is the headline: if the ladder reorders, a single-variant
+benchmark would have given you the wrong ranking.
+
+Two-player variants only, since a round robin is pairwise; anything else is
+listed as skipped. Cost is `variants x pairings x games`, printed before the run
+starts.
+
 ### `bench` — engine throughput
 
 ```bash
@@ -410,7 +449,7 @@ moves, free placement, obstacles, or different gravity all plug straight in.
 ## Development
 
 ```bash
-pytest                          # 275 tests
+pytest                          # 292 tests
 pytest -m "not rl"              # skip tests needing the [rl] extra
 pytest --cov --cov-report=term-missing
 ruff check connectx agents tests recipes scripts
@@ -420,6 +459,22 @@ mypy
 
 CI runs the tests on Python 3.10-3.13, plus lint, types, and a smoke test that
 executes every command on this page against a clean checkout.
+
+### Is numba pulling its weight?
+
+`scripts/ablation.py` answers that with measurements rather than opinion. It
+compares the shipped JIT code against the same source uncompiled *and* against
+an idiomatic numpy implementation:
+
+```bash
+python scripts/ablation.py                                # numba enabled
+NUMBA_DISABLE_JIT=1 python scripts/ablation.py            # same code, no JIT
+python scripts/ablation.py micro --json results/ablation.json
+```
+
+The whole test suite passes under `NUMBA_DISABLE_JIT=1`, so numba is a pure
+accelerator here — never load-bearing for behaviour. Summary of the result is in
+the [README](README.md#why-numba).
 
 ---
 
