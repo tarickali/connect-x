@@ -219,3 +219,69 @@ class TestErrorHandling:
         )
         assert code == 2
         assert "error:" in capsys.readouterr().err
+
+
+class TestSurfaceCommand:
+    def test_surface(self, capsys) -> None:
+        code = main(
+            [
+                "surface",
+                "--agents",
+                "random",
+                "greedy",
+                "--shapes",
+                "4x5",
+                "--ks",
+                "3",
+                "--games",
+                "4",
+                "--quiet",
+            ]
+        )
+        assert code == 0
+        output = capsys.readouterr().out
+        assert "4x5k3p2" in output
+        assert "spread" in output
+
+    def test_surface_writes_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "surface.jsonl"
+            main(
+                [
+                    "surface",
+                    "--agents",
+                    "random",
+                    "greedy",
+                    "--shapes",
+                    "4x5",
+                    "--ks",
+                    "3",
+                    "--games",
+                    "4",
+                    "--quiet",
+                    "--jsonl",
+                    str(path),
+                ]
+            )
+            lines = path.read_text().strip().splitlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0])["variant"] == "4x5k3p2"
+
+    def test_surface_with_no_valid_variants(self, capsys) -> None:
+        code = main(
+            [
+                "surface",
+                "--agents",
+                "random",
+                "greedy",
+                "--shapes",
+                "3x3",
+                "--ks",
+                "9",
+                "--games",
+                "2",
+                "--quiet",
+            ]
+        )
+        assert code == 2
+        assert "no valid variants" in capsys.readouterr().err

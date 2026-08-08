@@ -7,6 +7,7 @@ whether you are watching one game or sweeping fifty boards::
     connectx match   --shape 6 7 --k 4 --agents minimax:depth=4 greedy --games 200
     connectx tournament --preset connect4 --agents random greedy mcts minimax:depth=4
     connectx sweep   --agents minimax:depth=4 random --shapes 5x6 6x7 8x9 --ks 3 4
+    connectx surface --agents random greedy minimax:depth=4 --shapes 5x6 9x10 --ks 3 4
     connectx bench   --preset connect4
 """
 
@@ -191,6 +192,49 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_surface(args: argparse.Namespace) -> int:
+    from connectx.arena import TournamentResult
+    from connectx.variants import tournament_surface, variant_grid
+
+    shapes = (
+        [_parse_shape(s) for s in args.shapes]
+        if args.shapes
+        else [(5, 6), (6, 7), (7, 9), (9, 10)]
+    )
+    ks = args.ks or [3, 4, 5]
+
+    configs = variant_grid(shapes, ks, [2])
+    if not configs:
+        print("error: no valid variants in that grid", file=sys.stderr)
+        return 2
+
+    def progress(tournament: TournamentResult) -> None:
+        if not args.quiet:
+            print(f"  {config_id(tournament.config):<12} done", flush=True)
+
+    pairings = len(args.agents) * (len(args.agents) - 1) // 2
+    if not args.quiet:
+        print(
+            f"{len(configs)} variants x {pairings} pairings x {args.games} games "
+            f"= {len(configs) * pairings * args.games:,} games\n"
+        )
+    result = tournament_surface(
+        args.agents,
+        configs,
+        games=args.games,
+        seed=args.seed,
+        workers=args.workers,
+        on_variant=progress,
+    )
+    print()
+    print(result.table())
+    if result.skipped:
+        print(f"\nskipped (needs two players): {', '.join(result.skipped)}")
+    if args.jsonl:
+        print(f"\nwrote {result.write_jsonl(args.jsonl)}")
+    return 0
+
+
 def cmd_bench(args: argparse.Namespace) -> int:
     from connectx.benchmark import run_benchmarks
 
@@ -267,6 +311,19 @@ def build_parser() -> argparse.ArgumentParser:
     sweep_parser.add_argument("--quiet", action="store_true")
     sweep_parser.add_argument("--jsonl", help="write one JSON record per variant")
     sweep_parser.set_defaults(func=cmd_sweep)
+
+    surface = subparsers.add_parser(
+        "surface", help="round robin on every variant: the generalization surface"
+    )
+    surface.add_argument("--agents", nargs="+", required=True)
+    surface.add_argument("--shapes", nargs="+", metavar="ROWSxCOLS", help="e.g. 5x6 6x7")
+    surface.add_argument("--ks", nargs="+", type=int)
+    surface.add_argument("--games", type=int, default=40)
+    surface.add_argument("--seed", type=int, default=0)
+    surface.add_argument("--workers", type=int, default=1)
+    surface.add_argument("--quiet", action="store_true")
+    surface.add_argument("--jsonl", help="write one JSON record per variant")
+    surface.set_defaults(func=cmd_surface)
 
     bench = subparsers.add_parser("bench", help="engine throughput benchmarks")
     _add_variant_flags(bench)

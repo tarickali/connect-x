@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from connectx.arena import MatchResult, play_match
+from connectx.arena import MatchResult, TournamentResult, play_match, round_robin
 from connectx.config import ConfigError, config_id, make_config
 from connectx.types import Config
 
@@ -26,6 +26,8 @@ __all__ = [
     "variant_grid",
     "SweepResult",
     "sweep",
+    "TournamentSurface",
+    "tournament_surface",
 ]
 
 PathLike = str | Path
@@ -153,3 +155,175 @@ def sweep(
         if on_variant is not None:
             on_variant(match)
     return SweepResult(specs=list(specs), matches=matches, skipped=skipped)
+
+
+@dataclass
+class TournamentSurface:
+    """A full round robin run on every variant — the generalization surface.
+
+    Each variant's ratings are fitted independently and anchored to the same
+    mean, so **only differences within a column are meaningful**. Comparing an
+    agent's absolute Elo across variants says nothing; comparing the *gaps*, the
+    spread, and the ordering does. That is deliberate: an agent cannot be
+    "1700 Elo" in the abstract, only 1700 relative to the field it played.
+    """
+
+    specs: list[str]
+    tournaments: list[TournamentResult] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+
+    @property
+    def variants(self) -> list[str]:
+        return [config_id(t.config) for t in self.tournaments]
+
+    def rating_matrix(self) -> dict[str, dict[str, float]]:
+        """``{agent: {variant: elo}}``."""
+        return {
+            spec: {
+                config_id(t.config): t.ratings.get(spec, float("nan"))
+                for t in self.tournaments
+            }
+            for spec in self.specs
+        }
+
+    def spread(self) -> dict[str, float]:
+        """Elo range between best and worst agent, per variant.
+
+        A small spread means the variant fails to separate these agents — the
+        board is too shallow for skill to express itself.
+        """
+        out = {}
+        for tournament in self.tournaments:
+            values = list(tournament.ratings.values())
+            out[config_id(tournament.config)] = (
+                max(values) - min(values) if values else 0.0
+            )
+        return out
+
+    def ranks(self) -> dict[str, dict[str, int]]:
+        """``{agent: {variant: rank}}``, 1 = strongest on that variant."""
+        out: dict[str, dict[str, int]] = {spec: {} for spec in self.specs}
+        for tournament in self.tournaments:
+            variant = config_id(tournament.config)
+            order = sorted(tournament.ratings, key=lambda s: -tournament.ratings[s])
+            for position, spec in enumerate(order, start=1):
+                out[spec][variant] = position
+        return out
+
+    def rank_changes(self) -> list[str]:
+        """Agents whose position in the ladder is not the same on every variant.
+
+        These are the interesting rows: a reordering means the comparison does
+        not transfer, which is exactly what a single-variant benchmark hides.
+        """
+        ranks = self.ranks()
+        return [spec for spec in self.specs if len(set(ranks[spec].values())) > 1]
+
+    def table(self) -> str:
+        if not self.tournaments:
+            return "(no variants)"
+        variants = self.variants
+        matrix = self.rating_matrix()
+        ranks = self.ranks()
+        # Strongest-on-average first, purely for readability.
+        order = sorted(
+            self.specs,
+            key=lambda s: -sum(matrix[s].values()) / max(len(variants), 1),
+        )
+        rank_label = f"rank of {order[0]}"
+        width = max(max(len(s) for s in self.specs), len(rank_label))
+        columns = max(max(len(v) for v in variants), 8)
+
+        header = f"{'agent':<{width}}  " + "  ".join(f"{v:>{columns}}" for v in variants)
+        lines = [
+            "Elo by variant (each column fitted independently, mean 1500;",
+            "compare within a column, never across)",
+            "",
+            header,
+            "-" * len(header),
+        ]
+        for spec in order:
+            cells = "  ".join(f"{matrix[spec][v]:>{columns},.0f}" for v in variants)
+            lines.append(f"{spec:<{width}}  {cells}")
+
+        lines.append("-" * len(header))
+        spreads = self.spread()
+        lines.append(
+            f"{'spread':<{width}}  "
+            + "  ".join(f"{spreads[v]:>{columns},.0f}" for v in variants)
+        )
+        lines.append(
+            f"{rank_label:<{width}}  "
+            + "  ".join(f"{ranks[order[0]][v]:>{columns}}" for v in variants)
+        )
+
+        moved = self.rank_changes()
+        lines.append("")
+        if moved:
+            lines.append(
+                f"ladder order is NOT stable across variants; moved: {', '.join(moved)}"
+            )
+        else:
+            lines.append("ladder order is identical on every variant")
+        return "\n".join(lines)
+
+    def to_records(self) -> list[dict[str, Any]]:
+        ranks = self.ranks()
+        records = []
+        for tournament in self.tournaments:
+            variant = config_id(tournament.config)
+            records.append(
+                {
+                    "variant": variant,
+                    "config": {
+                        "shape": list(tournament.config["shape"]),
+                        "k": tournament.config["k"],
+                        "players": list(tournament.config["players"]),
+                    },
+                    "ratings": dict(tournament.ratings),
+                    "ranks": {spec: ranks[spec][variant] for spec in self.specs},
+                    "spread": self.spread()[variant],
+                }
+            )
+        return records
+
+    def write_jsonl(self, filepath: PathLike) -> Path:
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w") as handle:
+            for record in self.to_records():
+                handle.write(json.dumps(record) + "\n")
+        return path
+
+
+def tournament_surface(
+    specs: Sequence[str],
+    configs: Sequence[Config],
+    *,
+    games: int = 40,
+    seed: int | None = 0,
+    workers: int = 1,
+    on_variant: Callable[[TournamentResult], None] | None = None,
+) -> TournamentSurface:
+    """Run a full round robin on every variant.
+
+    Two-player variants only, since a round robin is a pairwise construction;
+    anything else is recorded in :attr:`TournamentSurface.skipped`.
+    """
+    tournaments: list[TournamentResult] = []
+    skipped: list[str] = []
+    for index, config in enumerate(configs):
+        if len(config["players"]) != 2:
+            skipped.append(config_id(config))
+            continue
+        tournament = round_robin(
+            config,
+            specs,
+            games=games,
+            seed=None if seed is None else seed + index * 7919,
+            workers=workers,
+        )
+        tournaments.append(tournament)
+        if on_variant is not None:
+            on_variant(tournament)
+    return TournamentSurface(specs=list(specs), tournaments=tournaments, skipped=skipped)

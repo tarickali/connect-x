@@ -2,6 +2,8 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from connectx.config import config_id
 from connectx.variants import sweep, variant_grid
 
@@ -95,3 +97,89 @@ class TestSweep:
         record = json.loads(lines[0])
         assert record["variant"] == "4x5k3p2"
         assert record["specs"] == ["greedy", "random"]
+
+
+class TestTournamentSurface:
+    def _surface(self, games: int = 4):
+        from connectx.variants import tournament_surface
+
+        configs = variant_grid([(4, 5), (5, 6)], [3], [2])
+        return tournament_surface(
+            ["random", "greedy", "minimax:depth=2"], configs, games=games, seed=0
+        )
+
+    def test_runs_a_round_robin_per_variant(self) -> None:
+        surface = self._surface()
+        assert surface.variants == ["4x5k3p2", "5x6k3p2"]
+        assert len(surface.tournaments) == 2
+        assert not surface.skipped
+
+    def test_skips_multiplayer_variants(self) -> None:
+        from connectx.variants import tournament_surface
+
+        configs = variant_grid([(5, 6)], [3], [2, 3])
+        surface = tournament_surface(["random", "greedy"], configs, games=4, seed=0)
+        assert surface.variants == ["5x6k3p2"]
+        assert surface.skipped == ["5x6k3p3"]
+
+    def test_rating_matrix_is_dense(self) -> None:
+        surface = self._surface()
+        matrix = surface.rating_matrix()
+        assert set(matrix) == {"random", "greedy", "minimax:depth=2"}
+        for ratings in matrix.values():
+            assert set(ratings) == {"4x5k3p2", "5x6k3p2"}
+
+    def test_each_column_is_anchored_independently(self) -> None:
+        # Ratings are only comparable within a variant, which is exactly what
+        # the anchoring guarantees; assert it so the caveat stays true.
+        surface = self._surface()
+        for tournament in surface.tournaments:
+            values = list(tournament.ratings.values())
+            assert sum(values) / len(values) == pytest.approx(1500.0, abs=1.0)
+
+    def test_ranks_are_a_permutation(self) -> None:
+        surface = self._surface()
+        ranks = surface.ranks()
+        for variant in surface.variants:
+            positions = sorted(ranks[spec][variant] for spec in surface.specs)
+            assert positions == [1, 2, 3]
+
+    def test_spread_is_non_negative(self) -> None:
+        surface = self._surface()
+        assert all(value >= 0 for value in surface.spread().values())
+
+    def test_ladder_order_holds_on_easy_variants(self) -> None:
+        surface = self._surface(games=10)
+        ranks = surface.ranks()
+        for variant in surface.variants:
+            assert ranks["minimax:depth=2"][variant] < ranks["random"][variant]
+
+    def test_rank_changes_lists_unstable_agents(self) -> None:
+        surface = self._surface()
+        moved = surface.rank_changes()
+        ranks = surface.ranks()
+        for spec in surface.specs:
+            unstable = len(set(ranks[spec].values())) > 1
+            assert (spec in moved) == unstable
+
+    def test_table_renders(self) -> None:
+        table = self._surface().table()
+        assert "4x5k3p2" in table
+        assert "spread" in table
+        assert "ladder order" in table
+
+    def test_empty_surface(self) -> None:
+        from connectx.variants import tournament_surface
+
+        assert tournament_surface(["random", "greedy"], []).table() == "(no variants)"
+
+    def test_write_jsonl(self) -> None:
+        surface = self._surface()
+        with tempfile.TemporaryDirectory() as directory:
+            path = surface.write_jsonl(Path(directory) / "surface.jsonl")
+            lines = path.read_text().strip().splitlines()
+        assert len(lines) == 2
+        record = json.loads(lines[0])
+        assert record["variant"] == "4x5k3p2"
+        assert set(record["ratings"]) == {"random", "greedy", "minimax:depth=2"}
+        assert set(record["ranks"].values()) == {1, 2, 3}

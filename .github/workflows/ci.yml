@@ -95,7 +95,9 @@ jobs:
           connectx match --preset tiny --agents greedy random --games 20
           connectx tournament --preset tiny --agents random greedy --games 10
           connectx sweep --agents greedy random --shapes 4x5 5x6 --ks 3 --games 10 --quiet
+          connectx surface --agents random greedy --shapes 4x5 --ks 3 --games 10 --quiet
           connectx bench --preset tiny --quick
+          python scripts/ablation.py macro --json /tmp/ablation.json
           python main.py play --preset tiny --agents random random --quiet
           python recipes/class_example.py
           python recipes/functional_example.py
