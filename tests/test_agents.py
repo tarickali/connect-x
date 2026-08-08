@@ -184,6 +184,31 @@ class TestMCTSAgent:
         action = agent.select(make_state(grid, 0, 0), cxf.generate_actions(grid))
         assert 0 <= action < config["shape"][1]
 
+    def test_payoff_table_is_zero_sum(self) -> None:
+        # Backups come from a table built once in reset(); a simulation must
+        # never allocate, and the table has to stay zero-sum for any seat count.
+        for players in ([1, 2], [1, 2, 3], [1, 2, 3, 4]):
+            config = make_config((6, 7), 4, players)
+            agent = MCTSAgent(config, simulations=1, seed=0)
+            assert agent._payoffs[0] == [0.0] * len(players)
+            for seat, token in enumerate(players):
+                payoff = agent._payoffs[token]
+                assert payoff[seat] == 1.0
+                assert sum(payoff) == pytest.approx(0.0)
+
+    def test_payoff_table_follows_reset(self) -> None:
+        agent = MCTSAgent(preset("connect4"), simulations=1, seed=0)
+        agent.reset(make_config((5, 6), 3, [1, 2, 3]))
+        assert len(agent._payoffs[1]) == 3
+
+    def test_backup_keeps_the_root_consistent(self) -> None:
+        config = preset("small")
+        grid = cxf.create_grid(config["shape"])
+        agent = MCTSAgent(config, simulations=200, seed=0)
+        agent.select(make_state(grid, 0, 0), cxf.generate_actions(grid))
+        # Every simulation increments exactly one child of the root.
+        assert sum(agent.last_visits.values()) == 200
+
     def test_visit_counts_exposed(self) -> None:
         config = preset("small")
         grid = cxf.create_grid(config["shape"])
