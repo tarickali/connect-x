@@ -4,6 +4,42 @@
 
 ### Added
 
+- **Provenance on every result.** Records now carry the seed, a UTC timestamp,
+  the git SHA and dirty flag, and the connectx/Python/numpy/numba versions. A
+  record previously could not be reproduced from itself, because the seed that
+  produced it was never written down. New module: `connectx.results`.
+- **Sample-size planning.** `games_needed(elo_gap)` and `resolvable_gap(games)`,
+  plus `elo_to_score` / `score_to_elo`. Applying these to the first surface run
+  showed its small-board result was noise: 40 games resolves only ~160 Elo, and
+  the reported gap was 42.
+- **Resumable runs.** `sweep` and `surface` take `jsonl=` to append each
+  variant's record as it completes and `resume=True` (CLI: `--resume`) to skip
+  variants already present, so a run that dies partway keeps its work.
+- **Engine factories.** `play_game`, `play_match`, `round_robin`, `sweep`,
+  `tournament_surface`, both adapters, and the benchmarks all take an `engine=`
+  argument instead of importing `Game`.
+- `GameEngine.action_space_size`, so policy widths come from the engine rather
+  than assuming one action per column. `build_supervised` uses it.
+- `tests/test_engine_conformance.py` — a dynamics-agnostic contract suite. Add a
+  new game to `ENGINES` and it is checked against the protocol, the arena, and
+  the dataset pipeline.
+
+### Fixed
+
+- `Trajectory.replay` rebuilt positions with the gravity-based `place_token`
+  rather than replaying through the engine, so a game with different placement
+  rules would have replayed *wrong* rather than failed — silently mislabelling
+  anything `build_supervised` produced from it.
+- `TournamentSurface.to_records` and the streaming writer emitted different
+  record shapes; they now share one writer.
+- Corrected the README's headline result. The 40-game surface reported the agent
+  ladder reordering on small boards; at 600 games that difference is zero. The
+  real finding is that `k=3` variants are forced first-player wins both agents
+  convert, so they measure nothing about agent skill — visible in `seat_wins`
+  reading 200-0.
+
+### Added (earlier in this release)
+
 - `connectx surface` and `connectx.variants.tournament_surface` — a full round
   robin on every variant, with per-variant Elo, ranks, and the spread between
   best and worst agent. Ratings are fitted per variant and anchored to the same

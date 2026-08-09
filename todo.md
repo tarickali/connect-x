@@ -1,10 +1,8 @@
 # Todo List
 
-## 0. Before serious research runs start
+## 0. Before serious research runs start — done
 
-Small, and each one is painful to retrofit once results exist.
-
-- [ ] **Record provenance in every result.** Today a JSONL record holds the
+- [x] **Record provenance in every result.** Today a JSONL record holds the
       config, the specs, and the numbers — but **not the seed**, so a result
       cannot be reproduced from its own record. Add seed, UTC timestamp, git
       SHA, `connectx.__version__`, and the numpy/numba versions to
@@ -12,33 +10,31 @@ Small, and each one is painful to retrofit once results exist.
       records. This is the single highest-value item on this page: in three
       months there will be forty result files and no way to tell which code
       produced them.
-- [ ] **Sample-size helper.** `games_needed(elo_gap, confidence)` — a run that
-      cannot resolve the difference it is looking for is wasted compute. The
-      Wilson machinery for it is already in `connectx.arena`.
-- [ ] **Resumable long runs.** A sweep that dies at variant 11 of 12 should not
-      restart from zero. Append records as each variant finishes and skip
-      variants already present in the output file.
+- [x] **Sample-size helper.** `games_needed` / `resolvable_gap`. Immediately
+      caught a false claim in the README's own headline result.
+- [x] **Resumable long runs.** `sweep(jsonl=..., resume=True)` and `--resume`.
 
-## 1. Finish the GameEngine seam
+## 1. Finish the GameEngine seam — done
 
-Prerequisite for every new game below, and currently overstated in the docs.
+- [x] Every consumer takes an `engine=` factory: `play_game`, `play_match`,
+      `round_robin`, `sweep`, `tournament_surface`, both adapters, benchmarks.
+- [x] `Trajectory.replay(engine)` replays through the engine instead of
+      assuming gravity; `build_supervised` threads it through.
+- [x] `GameEngine.action_space_size` drives policy width, so a wider action
+      space no longer needs a retrofit. `mirror_action` is documented as
+      column-only and `build_supervised` rejects mirroring when the action space
+      is not per-column.
+- [x] Confirmed `validate_config` passes unknown keys through, so a new game can
+      carry extra config fields. Covered by a test.
+- [x] `tests/test_engine_conformance.py`: 73 dynamics-agnostic checks covering
+      the protocol, state isolation, outcomes, recording, and integration with
+      the arena and dataset pipeline. **Add a new game to `ENGINES` and it is
+      checked automatically.**
 
-- [ ] Nothing consumes `GameEngine`: `arena.play_game`, both adapters,
-      `benchmark`, and `cli` all construct the concrete `Game`. Route them
-      through an engine factory (`engine=Game` by default).
-- [ ] `Trajectory.replay` reconstructs positions with the gravity-based
-      `place_token`, so a free-placement game would replay *wrong* rather than
-      fail loudly. Replay must go through the engine that produced the episode.
-      `dataset.build_supervised` inherits this, so it would silently generate
-      mislabelled training data.
-- [ ] Action-space assumptions: `encoding.mirror_action(action, cols)` is
-      column-indexed. Free placement needs a 2D mirror, and the policy-head
-      width becomes `rows * cols` rather than `cols`.
-- [ ] `Config` is fixed at `shape`/`k`/`players`. New dynamics need extra
-      fields (gravity on/off, exact-`k` vs overlines, stones per turn), so
-      `validate_config` needs to be extensible rather than closed.
-- [ ] Add a conformance test suite any `GameEngine` must pass, so a new game is
-      verified against the protocol rather than by inspection.
+Remaining for a *free-placement* game specifically (do with section 2):
+
+- [ ] 2D mirror for the free-placement action space.
+- [ ] `Config` fields for the new dynamics (`gravity`, exact-`k`, stones/turn).
 
 ## 2. Rule diversity: the m,n,k family
 

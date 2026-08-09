@@ -37,41 +37,52 @@ intervals, and variant sweeps are first-class.
 
 ## What generalization looks like here
 
-A full round robin on twelve variants — 12 boards × 6 pairings × 40 games,
-2,880 games, seats rotated throughout. **The ladder reorders.**
+**Not every variant in a parameterized family measures anything.** That turns
+out to be the first real result, and the harness is built to surface it rather
+than average over it.
 
-| agent | 5x6 k=3 | 5x6 k=4 | 6x7 k=4 | 9x10 k=5 | 12x12 k=5 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `minimax:depth=4` | 1737 | 1798 | **2033** | **2185** | **2209** |
-| `mcts:simulations=400` | **1779** | **1827** | 1883 | 1779 | 1809 |
-| `greedy` | 1623 | 1446 | 1369 | 1345 | 1316 |
-| `random` | 862 | 929 | 716 | 690 | 665 |
-| *minimax − mcts* | *−42* | *−29* | *+150* | *+406* | *+400* |
+`minimax:depth=4` versus `mcts:simulations=400`, seats rotated, 600 games per
+variant — enough to resolve a 40 Elo difference:
 
-MCTS is ahead on the small boards and 400 Elo behind on the large ones. Nothing
-about either agent changed — only the board did. Pick 5x6 as your benchmark and
-you conclude MCTS is stronger; pick 12x12 and you conclude the opposite.
+| variant | minimax score | 95% CI | Elo gap | seat wins | what it measures |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 5x6 k=3 | 50.00% | [46.0%, 54.0%] | 0 ± 28 | **200–0** | nothing |
+| 6x7 k=3 | 50.00% | [46.0%, 54.0%] | 0 ± 28 | **200–0** | nothing |
+| 5x6 k=4 | 54.75% | [50.8%, 58.7%] | +33 | 131–35 | a little |
+| 12x12 k=5 | 96.50% | [93.0%, 98.3%] | **+576** | 101–99 | a lot |
 
-The effect is not a compute artifact, which makes it sharper: `mcts:simulations=400`
-takes ~3.6 ms per move against minimax's ~0.32 ms, so the agent that loses on
-large boards is the one spending **11× more time**. A fixed simulation budget
-covers a vanishing fraction of a growing tree, while fixed-depth tactical search
-stays exact.
+On the `k=3` boards the first player wins **every single game** — it is a forced
+win that both agents find and neither loses. The entrants finish exactly 50/50
+because seats were rotated, and the score is a property of the rotation, not of
+either agent. Without seat rotation this variant reads as a coin flip; without
+`seat_wins` reported alongside, you would never learn why.
 
-The `spread` row of the full table carries a second result: the Elo range
-between best and worst agent runs from 757 (5x6 k=5) to 1544 (12x12 k=5). Some
-variants barely separate these agents at all — worth knowing before you use one
-as a benchmark.
+At the other end, 12x12 k=5 has no first-player advantage left (101–99) *and*
+separates the agents decisively (+576 Elo). That combination — balanced seats,
+wide skill gap — is what a variant has to have to be worth benchmarking on.
+
+Two methodological notes that fell out of building this, both now enforced in
+code:
+
+- **The 40-game version of this table said the opposite.** A coarser sweep put
+  MCTS 42 Elo ahead on 5x6 k=3, and it was noise: 40 games can only resolve
+  ~160 Elo. `connectx.arena.games_needed(40)` says 874 games are needed to call
+  a 40 Elo difference, so the harness will now tell you before you spend the
+  compute.
+- The comparison is equal-*budget*, not equal-time. `mcts:simulations=400` takes
+  ~3.6 ms per move against minimax's ~0.32 ms, so on large boards the agent
+  losing by 576 Elo is the one spending **11× more time per move**.
 
 ```bash
 connectx surface --agents random greedy minimax:depth=4 mcts:simulations=400 \
-  --shapes 5x6 6x7 9x10 12x12 --ks 3 4 5 --games 40 --workers 8
+  --shapes 5x6 6x7 9x10 12x12 --ks 3 4 5 --games 600 --workers 8 \
+  --jsonl results/surface.jsonl --resume
 ```
 
-Two caveats the harness makes explicit rather than hiding: ratings are fitted
-per variant and anchored to the same mean, so **only differences within a column
-mean anything**; and this is an equal-*budget* comparison, not equal-time. An
-equal-time mode is on the roadmap.
+Ratings are fitted per variant and anchored to the same mean, so **only
+differences within a column mean anything**. Every record carries its seed, git
+SHA, and library versions, so any number here can be traced back to the code
+that produced it.
 
 ---
 
@@ -90,8 +101,10 @@ equal-time mode is on the roadmap.
 - **An agent ladder** — random → greedy → alpha-beta minimax → UCT MCTS, so a
   win rate means something.
 - **A measurement harness** — matches with Wilson intervals, round-robin
-  tournaments with Elo, variant sweeps, generalization surfaces, JSONL results,
-  process parallelism.
+  tournaments with Elo, variant sweeps, generalization surfaces, sample-size
+  planning, process parallelism, and resumable runs.
+- **Reproducible by construction** — every result record carries its seed, git
+  SHA, and library versions; worker count never changes a number.
 
 ---
 
@@ -167,7 +180,8 @@ agents: Agent protocol ──► random │ greedy │ minimax │ mcts │ huma
 | Data | `connectx.trajectory`, `connectx.dataset` | Episodes, replay, dataset shards |
 | Learning | `connectx.encoding` | Planes, masks, mirror symmetry |
 | Bridges | `connectx.adapters` | PettingZoo AEC, Gymnasium |
-| Measurement | `connectx.arena`, `connectx.variants` | Matches, tournaments, sweeps |
+| Measurement | `connectx.arena`, `connectx.variants` | Matches, tournaments, sweeps, surfaces |
+| Provenance | `connectx.results` | Seeds, versions, JSONL, resume |
 | Agents | `agents` | Baseline ladder + registry |
 
 The engine never imports agent code, and agents never import the harness — so a

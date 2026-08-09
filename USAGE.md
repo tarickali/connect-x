@@ -172,7 +172,9 @@ mean       93.4%   min 63.3%  max 100.0%  spread 36.7%
 ```
 
 The `spread` is the headline: how much of the agent's edge survives a change of
-board. Shapes accept `6x7` or `6,7`. Combinations where no win fits (`k=9` on a
+board — but check it is real before believing it. At 100 games the smallest
+resolvable difference is about 99 Elo (`resolvable_gap(100)`), so treat anything
+inside the confidence intervals as noise. Shapes accept `6x7` or `6,7`. Combinations where no win fits (`k=9` on a
 4x5 board) are dropped automatically. `--player-counts 2 3 4` sweeps seat counts;
 variants whose seat count does not match the number of agents are skipped and
 listed.
@@ -203,6 +205,11 @@ rank of minimax:depth=4          2          1          1          1
 ladder order is NOT stable across variants; moved: minimax:depth=4, mcts:simulations=400
 ```
 
+**Check the sample size before believing a reordering.** The run above used 40
+games per pairing, which resolves only ~160 Elo; re-run at 600 games and the
+small-board differences in that table collapse to zero. `games_needed(gap)`
+tells you the budget a claim requires.
+
 Read it by column, never by row: each variant's ratings are fitted
 independently and anchored to the same mean, so an agent's absolute Elo carries
 no cross-variant meaning. What *does* transfer is the ordering, the gaps, and
@@ -215,6 +222,47 @@ benchmark would have given you the wrong ranking.
 Two-player variants only, since a round robin is pairwise; anything else is
 listed as skipped. Cost is `variants x pairings x games`, printed before the run
 starts.
+
+### Planning a run, and resuming one
+
+A run too small to resolve the difference it is looking for is wasted compute:
+
+```python
+from connectx.arena import games_needed, resolvable_gap
+
+games_needed(100)     # 98 games to call a 100 Elo difference
+games_needed(25)      # 1520 for a 25 Elo difference
+resolvable_gap(40)    # 40 games can only resolve ~160 Elo
+```
+
+`sweep` and `surface` accept `--jsonl PATH` to append each variant's record the
+moment it finishes, and `--resume` to skip variants already in that file:
+
+```bash
+connectx surface --agents random greedy minimax:depth=4 --shapes 5x6 6x7 9x10 \
+  --ks 3 4 5 --games 600 --workers 8 --jsonl results/surface.jsonl --resume
+```
+
+A run that dies at variant 11 of 12 keeps the first ten; rerun the same command
+with `--resume` and it finishes the twelfth.
+
+### Reproducing a result
+
+Every record carries the seed, timestamp, git SHA and dirty flag, and the
+`connectx`/Python/numpy/numba versions it ran under:
+
+```python
+import json
+record = json.loads(open("results/surface.jsonl").readline())
+record["provenance"]
+# {'seed': 0, 'timestamp': '...+00:00',
+#  'git': {'sha': '...', 'dirty': False},
+#  'env': {'connectx': '0.2.0', 'numpy': '...', 'numba': '...', ...}}
+```
+
+Rerun with that seed on that SHA and you get the same numbers — including the
+same numbers on a different worker count, since per-game seeds derive from the
+game index rather than from execution order.
 
 ### `bench` — engine throughput
 
@@ -456,7 +504,7 @@ through an engine factory before a second game works end to end. See
 ## Development
 
 ```bash
-pytest                          # 292 tests
+pytest                          # 397 tests
 pytest -m "not rl"              # skip tests needing the [rl] extra
 pytest --cov --cov-report=term-missing
 ruff check connectx agents tests recipes scripts
