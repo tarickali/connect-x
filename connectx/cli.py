@@ -181,14 +181,15 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         seed=args.seed,
         workers=args.workers,
         on_variant=progress,
+        jsonl=args.jsonl,
+        resume=args.resume,
     )
     print()
     print(result.table())
     if result.skipped:
         print(f"\nskipped (seat count mismatch): {', '.join(result.skipped)}")
     if args.jsonl:
-        path = result.write_jsonl(args.jsonl)
-        print(f"\nwrote {path}")
+        print(f"\nwrote {args.jsonl}")
     return 0
 
 
@@ -225,13 +226,15 @@ def cmd_surface(args: argparse.Namespace) -> int:
         seed=args.seed,
         workers=args.workers,
         on_variant=progress,
+        jsonl=args.jsonl,
+        resume=args.resume,
     )
     print()
     print(result.table())
     if result.skipped:
         print(f"\nskipped (needs two players): {', '.join(result.skipped)}")
     if args.jsonl:
-        print(f"\nwrote {result.write_jsonl(args.jsonl)}")
+        print(f"\nwrote {args.jsonl}")
     return 0
 
 
@@ -309,7 +312,14 @@ def build_parser() -> argparse.ArgumentParser:
     sweep_parser.add_argument("--seed", type=int, default=0)
     sweep_parser.add_argument("--workers", type=int, default=1)
     sweep_parser.add_argument("--quiet", action="store_true")
-    sweep_parser.add_argument("--jsonl", help="write one JSON record per variant")
+    sweep_parser.add_argument(
+        "--jsonl", help="append one JSON record per variant as it finishes"
+    )
+    sweep_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="skip variants already present in --jsonl",
+    )
     sweep_parser.set_defaults(func=cmd_sweep)
 
     surface = subparsers.add_parser(
@@ -322,7 +332,14 @@ def build_parser() -> argparse.ArgumentParser:
     surface.add_argument("--seed", type=int, default=0)
     surface.add_argument("--workers", type=int, default=1)
     surface.add_argument("--quiet", action="store_true")
-    surface.add_argument("--jsonl", help="write one JSON record per variant")
+    surface.add_argument(
+        "--jsonl", help="append one JSON record per variant as it finishes"
+    )
+    surface.add_argument(
+        "--resume",
+        action="store_true",
+        help="skip variants already present in --jsonl",
+    )
     surface.set_defaults(func=cmd_surface)
 
     bench = subparsers.add_parser("bench", help="engine throughput benchmarks")

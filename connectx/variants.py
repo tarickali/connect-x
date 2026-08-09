@@ -18,8 +18,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from connectx.arena import MatchResult, TournamentResult, play_match, round_robin
+from connectx.arena import (
+    EngineFactory,
+    MatchResult,
+    TournamentResult,
+    play_match,
+    round_robin,
+)
 from connectx.config import ConfigError, config_id, make_config
+from connectx.game import Game
+from connectx.results import append_jsonl, completed_variants, provenance, read_jsonl
 from connectx.types import Config
 
 __all__ = [
@@ -129,7 +137,10 @@ def sweep(
     games: int = 50,
     seed: int | None = 0,
     workers: int = 1,
+    engine: EngineFactory = Game,
     on_variant: Callable[[MatchResult], None] | None = None,
+    jsonl: PathLike | None = None,
+    resume: bool = False,
 ) -> SweepResult:
     """Run the same matchup on every variant.
 
@@ -137,12 +148,31 @@ def sweep(
     does not perturb the others' results. Variants whose seat count differs
     from ``len(specs)`` are recorded in :attr:`SweepResult.skipped` rather than
     raising, so a loosely specified grid stays runnable.
+
+    Pass ``jsonl`` to append each variant's record the moment it finishes, so a
+    run that dies partway keeps everything already computed. Add ``resume=True``
+    to skip variants already present in that file and load their results back.
     """
     matches: list[MatchResult] = []
     skipped: list[str] = []
+    done: set[str] = set()
+    cached: dict[str, MatchResult] = {}
+    if jsonl is not None and resume:
+        done = completed_variants(jsonl)
+        cached = {
+            str(record["variant"]): MatchResult.from_dict(record)
+            for record in read_jsonl(jsonl)
+            if "variant" in record and "wins" in record
+        }
+
     for index, config in enumerate(configs):
+        variant = config_id(config)
         if len(config["players"]) != len(specs):
-            skipped.append(config_id(config))
+            skipped.append(variant)
+            continue
+        if variant in done:
+            if variant in cached:
+                matches.append(cached[variant])
             continue
         match = play_match(
             config,
@@ -150,8 +180,11 @@ def sweep(
             games=games,
             seed=None if seed is None else seed + index * 7919,
             workers=workers,
+            engine=engine,
         )
         matches.append(match)
+        if jsonl is not None:
+            append_jsonl(jsonl, match.to_dict())
         if on_variant is not None:
             on_variant(match)
     return SweepResult(specs=list(specs), matches=matches, skipped=skipped)
@@ -268,24 +301,9 @@ class TournamentSurface:
         return "\n".join(lines)
 
     def to_records(self) -> list[dict[str, Any]]:
-        ranks = self.ranks()
-        records = []
-        for tournament in self.tournaments:
-            variant = config_id(tournament.config)
-            records.append(
-                {
-                    "variant": variant,
-                    "config": {
-                        "shape": list(tournament.config["shape"]),
-                        "k": tournament.config["k"],
-                        "players": list(tournament.config["players"]),
-                    },
-                    "ratings": dict(tournament.ratings),
-                    "ranks": {spec: ranks[spec][variant] for spec in self.specs},
-                    "spread": self.spread()[variant],
-                }
-            )
-        return records
+        # Same writer the streaming path uses, so a resumed file and a
+        # written-at-the-end file are byte-identical in shape.
+        return [_surface_record(t, self.specs) for t in self.tournaments]
 
     def write_jsonl(self, filepath: PathLike) -> Path:
         path = Path(filepath)
@@ -303,18 +321,47 @@ def tournament_surface(
     games: int = 40,
     seed: int | None = 0,
     workers: int = 1,
+    engine: EngineFactory = Game,
     on_variant: Callable[[TournamentResult], None] | None = None,
+    jsonl: PathLike | None = None,
+    resume: bool = False,
 ) -> TournamentSurface:
     """Run a full round robin on every variant.
 
     Two-player variants only, since a round robin is a pairwise construction;
     anything else is recorded in :attr:`TournamentSurface.skipped`.
+
+    Supports the same incremental ``jsonl`` writing and ``resume`` as
+    :func:`sweep`. Resumed variants carry their ratings but not their underlying
+    matches, which is enough for the table and the records.
     """
     tournaments: list[TournamentResult] = []
     skipped: list[str] = []
+    done: set[str] = set()
+    cached: dict[str, TournamentResult] = {}
+    if jsonl is not None and resume:
+        done = completed_variants(jsonl)
+        for record in read_jsonl(jsonl):
+            if "variant" not in record or "ratings" not in record:
+                continue
+            raw = record["config"]
+            cached[str(record["variant"])] = TournamentResult(
+                config=make_config(tuple(raw["shape"]), raw["k"], raw["players"]),
+                specs=list(specs),
+                matches={},
+                ratings=dict(record["ratings"]),
+                seed=record.get("provenance", {}).get("seed"),
+                provenance=record.get("provenance", {}),
+            )
+
     for index, config in enumerate(configs):
+        variant = config_id(config)
         if len(config["players"]) != 2:
-            skipped.append(config_id(config))
+            skipped.append(variant)
+            continue
+        if variant in done:
+            if variant in cached:
+                tournaments.append(cached[variant])
             continue
         tournament = round_robin(
             config,
@@ -322,8 +369,29 @@ def tournament_surface(
             games=games,
             seed=None if seed is None else seed + index * 7919,
             workers=workers,
+            engine=engine,
         )
         tournaments.append(tournament)
+        if jsonl is not None:
+            append_jsonl(jsonl, _surface_record(tournament, specs))
         if on_variant is not None:
             on_variant(tournament)
     return TournamentSurface(specs=list(specs), tournaments=tournaments, skipped=skipped)
+
+
+def _surface_record(tournament: TournamentResult, specs: Sequence[str]) -> dict[str, Any]:
+    """One variant's row of the surface, matching TournamentSurface.to_records."""
+    order = sorted(tournament.ratings, key=lambda s: -tournament.ratings[s])
+    values = list(tournament.ratings.values())
+    return {
+        "variant": config_id(tournament.config),
+        "config": {
+            "shape": list(tournament.config["shape"]),
+            "k": tournament.config["k"],
+            "players": list(tournament.config["players"]),
+        },
+        "ratings": dict(tournament.ratings),
+        "ranks": {spec: order.index(spec) + 1 for spec in specs},
+        "spread": (max(values) - min(values)) if values else 0.0,
+        "provenance": tournament.provenance or provenance(tournament.seed),
+    }

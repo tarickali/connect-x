@@ -12,32 +12,49 @@ wrong:
   which is exactly where agent comparisons land.
 - **Seed derivation.** Every game's seed is a pure function of the match seed,
   the game index, and the seat. Results are therefore identical whether the
-  match runs on one worker or twelve.
+  match runs on one worker or twelve, and every emitted record carries the seed
+  and the code version that produced it.
+
+Everything here takes an ``engine`` factory rather than importing a concrete
+game, so a variant with different dynamics can be measured by the same harness.
 """
 
 from __future__ import annotations
 
 import math
+import statistics
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
 from connectx.config import config_id, validate_config
+from connectx.engine import GameEngine
 from connectx.game import Game
+from connectx.results import provenance
 from connectx.types import Config
 
 __all__ = [
+    "EngineFactory",
     "GameResult",
     "MatchResult",
     "TournamentResult",
     "wilson_interval",
+    "elo_to_score",
+    "score_to_elo",
+    "games_needed",
+    "resolvable_gap",
     "play_game",
     "play_match",
     "round_robin",
     "elo_ratings",
 ]
+
+#: Anything that builds a :class:`~connectx.engine.GameEngine` from a config.
+#: Defaults to :class:`connectx.game.Game` everywhere; pass a different factory
+#: to measure a game with other dynamics.
+EngineFactory = Callable[..., GameEngine]
 
 
 # ----------------------------------------------------------------------
@@ -61,6 +78,64 @@ def wilson_interval(successes: float, total: int, z: float = 1.96) -> tuple[floa
         z * math.sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / denominator
     )
     return (max(0.0, center - spread), min(1.0, center + spread))
+
+
+def elo_to_score(gap: float) -> float:
+    """Expected score for a player ``gap`` Elo above their opponent."""
+    return 1.0 / (1.0 + 10.0 ** (-gap / 400.0))
+
+
+def score_to_elo(rate: float) -> float:
+    """Inverse of :func:`elo_to_score`. Perfect scores are infinite by construction."""
+    if rate <= 0.0:
+        return -math.inf
+    if rate >= 1.0:
+        return math.inf
+    return -400.0 * math.log10(1.0 / rate - 1.0)
+
+
+def games_needed(gap: float, *, confidence: float = 0.95, power: float = 0.8) -> int:
+    """Games required to show an Elo difference of ``gap`` is real.
+
+    A run too small to resolve the difference it is looking for is wasted
+    compute, and "agent A scored 55% over 40 games" is not evidence of anything.
+    This is the standard one-sample proportion test against 50%, rounded up to
+    an even number so seat rotation stays balanced.
+
+    Returns 0 for a zero gap, which has no finite answer — you cannot prove two
+    agents are exactly equal.
+    """
+    if gap == 0:
+        return 0
+    target = elo_to_score(abs(gap))
+    if target >= 1.0:
+        return 2
+    normal = statistics.NormalDist()
+    z_alpha = normal.inv_cdf(1.0 - (1.0 - confidence) / 2.0)
+    z_power = normal.inv_cdf(power)
+    numerator = (
+        z_alpha * math.sqrt(0.25) + z_power * math.sqrt(target * (1.0 - target))
+    ) ** 2
+    needed = numerator / (target - 0.5) ** 2
+    return 2 * math.ceil(needed / 2)
+
+
+def resolvable_gap(games: int, *, confidence: float = 0.95, power: float = 0.8) -> float:
+    """Smallest Elo gap ``games`` games can resolve — the inverse question.
+
+    Use it to sanity-check a budget before spending it: 40 games cannot
+    distinguish agents 50 Elo apart, no matter how the result reads.
+    """
+    if games < 2:
+        return math.inf
+    low, high = 0.0, 4000.0
+    for _ in range(60):
+        middle = (low + high) / 2.0
+        if games_needed(middle, confidence=confidence, power=power) <= games:
+            high = middle
+        else:
+            low = middle
+    return high
 
 
 # ----------------------------------------------------------------------
@@ -105,6 +180,7 @@ def play_game(
     seed: int | None = None,
     game_index: int = 0,
     record: bool = False,
+    engine: EngineFactory = Game,
 ) -> tuple[GameResult, Any | None]:
     """Play one game between agents built from ``specs``.
 
@@ -130,7 +206,7 @@ def play_game(
         agent_reset(agent, config)
         agents.append(agent)
 
-    game = Game(config, record=record)
+    game = engine(config, record=record)
     state, actions = game.start()
 
     started = time.perf_counter()
@@ -174,6 +250,8 @@ class MatchResult:
     seat_wins: list[int]
     total_steps: int
     duration: float
+    seed: int | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     def score(self, entrant: int) -> float:
         """Wins plus half the draws — the quantity Elo is fitted to."""
@@ -229,12 +307,36 @@ class MatchResult:
             "wins": list(self.wins),
             "draws": self.draws,
             "seat_wins": list(self.seat_wins),
+            "total_steps": self.total_steps,
             "score_rate": [self.score_rate(i) for i in range(len(self.specs))],
             "interval": [list(self.interval(i)) for i in range(len(self.specs))],
             "mean_steps": self.mean_steps,
             "moves_per_second": self.moves_per_second,
             "duration": self.duration,
+            # Without these a record cannot be reproduced, only admired.
+            "provenance": self.provenance or provenance(self.seed),
         }
+
+    @classmethod
+    def from_dict(cls, record: dict[str, Any]) -> MatchResult:
+        """Rebuild a result from its record, so a run can resume from disk."""
+        from connectx.config import make_config
+
+        raw = record["config"]
+        return cls(
+            config=make_config(tuple(raw["shape"]), raw["k"], raw["players"]),
+            specs=list(record["specs"]),
+            games=int(record["games"]),
+            wins=list(record["wins"]),
+            draws=int(record["draws"]),
+            seat_wins=list(record["seat_wins"]),
+            total_steps=int(
+                record.get("total_steps", round(record["mean_steps"] * record["games"]))
+            ),
+            duration=float(record.get("duration", 0.0)),
+            seed=record.get("provenance", {}).get("seed"),
+            provenance=record.get("provenance", {}),
+        )
 
 
 def _seating_for(game_index: int, n_players: int) -> list[int]:
@@ -249,12 +351,15 @@ def _play_chunk(
     indices: Sequence[int],
     seed: int | None,
     swap_seats: bool,
+    engine: EngineFactory = Game,
 ) -> list[GameResult]:
     n_players = len(config["players"])
     results = []
     for index in indices:
         seating = _seating_for(index, n_players) if swap_seats else None
-        result, _ = play_game(config, specs, seating=seating, seed=seed, game_index=index)
+        result, _ = play_game(
+            config, specs, seating=seating, seed=seed, game_index=index, engine=engine
+        )
         results.append(result)
     return results
 
@@ -267,6 +372,7 @@ def play_match(
     swap_seats: bool = True,
     seed: int | None = 0,
     workers: int = 1,
+    engine: EngineFactory = Game,
 ) -> MatchResult:
     """Play ``games`` games between ``specs`` and aggregate the outcome.
 
@@ -291,12 +397,12 @@ def play_match(
     indices = list(range(games))
     started = time.perf_counter()
     if workers <= 1:
-        results = _play_chunk(config, specs, indices, seed, swap_seats)
+        results = _play_chunk(config, specs, indices, seed, swap_seats, engine)
     else:
         chunks = [indices[i::workers] for i in range(workers)]
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = [
-                pool.submit(_play_chunk, config, specs, chunk, seed, swap_seats)
+                pool.submit(_play_chunk, config, specs, chunk, seed, swap_seats, engine)
                 for chunk in chunks
                 if chunk
             ]
@@ -324,6 +430,8 @@ def play_match(
         seat_wins=seat_wins,
         total_steps=total_steps,
         duration=duration,
+        seed=seed,
+        provenance=provenance(seed),
     )
 
 
@@ -398,6 +506,8 @@ class TournamentResult:
     specs: list[str]
     matches: dict[tuple[int, int], MatchResult] = field(default_factory=dict)
     ratings: dict[str, float] = field(default_factory=dict)
+    seed: int | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     def table(self) -> str:
         order = sorted(self.specs, key=lambda s: -self.ratings.get(s, 0.0))
@@ -431,6 +541,7 @@ class TournamentResult:
                 {"pair": [i, j], **match.to_dict()}
                 for (i, j), match in self.matches.items()
             ],
+            "provenance": self.provenance or provenance(self.seed),
         }
 
 
@@ -441,6 +552,7 @@ def round_robin(
     games: int = 50,
     seed: int | None = 0,
     workers: int = 1,
+    engine: EngineFactory = Game,
 ) -> TournamentResult:
     """Play every pair of entrants and fit Elo ratings to the results.
 
@@ -466,6 +578,7 @@ def round_robin(
                 games=games,
                 seed=None if seed is None else seed + i * 97 + j,
                 workers=workers,
+                engine=engine,
             )
             matches[(i, j)] = match
             scores[(i, j)] = (match.score(0), float(match.games))
@@ -475,4 +588,6 @@ def round_robin(
         specs=entrants,
         matches=matches,
         ratings=elo_ratings(entrants, scores),
+        seed=seed,
+        provenance=provenance(seed),
     )
