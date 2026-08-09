@@ -299,6 +299,11 @@ class Game:
         return actions
 
     @property
+    def action_space_size(self) -> int:
+        """One action per column: tokens are dropped, not placed freely."""
+        return int(self._config["shape"][1])
+
+    @property
     def active_player(self) -> int:
         """Token of the player to move."""
         if self._info is None:

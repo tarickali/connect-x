@@ -52,11 +52,13 @@ class ConnectXAECEnv(AECEnv):
         *,
         render_mode: str | None = None,
         rewards: RewardSpec = RewardSpec(),
+        engine: Any = None,
     ) -> None:
         super().__init__()
         self.config = validate_config(config)
         self.render_mode = render_mode
-        self._game = Game(self.config, rewards=rewards)
+        factory = engine if engine is not None else Game
+        self._game = factory(self.config, rewards=rewards)
         self._rows, self._cols = (int(v) for v in self.config["shape"])
         self._n_players = len(self.config["players"])
 

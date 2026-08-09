@@ -15,10 +15,16 @@ from typing import Any
 
 import numpy as np
 
-import connectx.functional as cxf
 from connectx.types import Action, Config, Grid, Report, Rewards, RewardSpec, State
 
 __all__ = ["TrajectoryStep", "Trajectory", "ReplayMemory"]
+
+
+def _default_engine() -> Any:
+    """Imported lazily: connectx.game imports this module."""
+    from connectx.game import Game
+
+    return Game
 
 
 @dataclass
@@ -79,24 +85,25 @@ class Trajectory:
             return np.array([], dtype=np.float64)
         return np.array([per_seat[s.player_index] for s in self.steps], dtype=np.float64)
 
-    def replay(self) -> Iterator[tuple[State, Action]]:
+    def replay(self, engine: Any = None) -> Iterator[tuple[State, Action]]:
         """Yield ``(state_before_move, action)`` for each step.
 
-        Reconstructs positions from the move list, so this works whether or not
-        grid snapshots were recorded.
+        Positions are rebuilt by *replaying the moves through the engine*, not
+        by assuming any particular placement rule. Pass the engine the episode
+        was recorded with when it is not the default drop game — reconstructing
+        a free-placement episode with gravity would silently produce wrong
+        boards rather than fail.
         """
-        grid = cxf.create_grid(self.config["shape"])
-        players = self.config["players"]
-        for time, step in enumerate(self.steps):
-            active = time % len(players)
-            view = grid.view()
-            view.setflags(write=False)
-            yield {"grid": view, "info": {"active": active, "time": time}}, step.action
-            grid = cxf.place_token(grid, np.uint8(players[active]), int(step.action))
+        factory = engine if engine is not None else _default_engine()
+        game = factory(self.config)
+        state, _ = game.start()
+        for step in self.steps:
+            yield state, step.action
+            state, _ = game.transition(step.action)
 
-    def grids(self) -> np.ndarray:
+    def grids(self, engine: Any = None) -> np.ndarray:
         """Stack the position before each move as ``(steps, rows, cols)``."""
-        boards = [np.array(state["grid"]) for state, _ in self.replay()]
+        boards = [np.array(state["grid"]) for state, _ in self.replay(engine)]
         if not boards:
             rows, cols = self.config["shape"]
             return np.zeros((0, rows, cols), dtype=np.uint8)

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -28,6 +29,13 @@ from connectx.trajectory import Trajectory, TrajectoryStep
 from connectx.types import Config, RewardSpec
 
 __all__ = ["save_trajectories", "load_trajectories", "build_supervised"]
+
+
+def _default_engine() -> Any:
+    from connectx.game import Game
+
+    return Game
+
 
 PathLike = str | Path
 
@@ -150,6 +158,7 @@ def build_supervised(
     spec: RewardSpec = RewardSpec(),
     mirror: bool = False,
     config: Config | None = None,
+    engine: Any = None,
 ) -> dict[str, np.ndarray]:
     """Flatten episodes into per-position arrays for a policy/value learner.
 
@@ -158,7 +167,12 @@ def build_supervised(
     eventual outcome for the player to move, and ``masks`` ``(n, cols)``.
 
     With ``mirror=True`` each position is emitted twice, the second reflected
-    left-to-right with its policy target reflected to match.
+    left-to-right with its policy target reflected to match. Mirroring assumes
+    a column action space, so it is rejected for engines with a wider one.
+
+    Policy width comes from the engine's ``action_space_size``, not from the
+    board width, so a game with a different action space produces correctly
+    shaped targets.
     """
     observations: list[np.ndarray] = []
     policies: list[np.ndarray] = []
@@ -166,13 +180,20 @@ def build_supervised(
     masks: list[np.ndarray] = []
     resolved = config
 
+    factory = engine if engine is not None else _default_engine()
     for trajectory in trajectories:
         resolved = resolved or trajectory.config
+        width = int(factory(trajectory.config).action_space_size)
         cols = int(trajectory.config["shape"][1])
+        if mirror and width != cols:
+            raise ValueError(
+                "mirror augmentation assumes one action per column; this engine "
+                f"has an action space of {width} over {cols} columns"
+            )
         returns = trajectory.returns(spec)
-        for index, (state, action) in enumerate(trajectory.replay()):
+        for index, (state, action) in enumerate(trajectory.replay(factory)):
             observation = encode_state(state, trajectory.config)
-            target = np.zeros(cols, dtype=np.float32)
+            target = np.zeros(width, dtype=np.float32)
             target[int(action)] = 1.0
             legal = (state["grid"][0, :] == 0).astype(np.uint8)
 

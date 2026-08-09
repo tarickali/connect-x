@@ -60,11 +60,11 @@ def _bench_functional(calls: int) -> list[dict[str, Any]]:
     return rows
 
 
-def _bench_game(calls: int) -> list[dict[str, Any]]:
+def _bench_game(calls: int, engine: Any = Game) -> list[dict[str, Any]]:
     rows = []
     for shape in _SHAPES:
         config = make_config(shape, 4, [1, 2])
-        game = Game(config)
+        game = engine(config)
         game.start()
 
         # Warm up, then measure a stream of legal moves with resets on terminal.

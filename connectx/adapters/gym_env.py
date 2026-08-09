@@ -45,6 +45,7 @@ class ConnectXGymEnv(gym.Env):
         render_mode: str | None = None,
         rewards: RewardSpec = RewardSpec(),
         illegal_move_reward: float = -1.0,
+        engine: Any = None,
     ) -> None:
         super().__init__()
         self.config = validate_config(config)
@@ -58,7 +59,8 @@ class ConnectXGymEnv(gym.Env):
             raise ValueError(f"seat {seat} out of range for {n_players} players")
 
         self._rows, self._cols = (int(v) for v in self.config["shape"])
-        self._game = Game(self.config, rewards=rewards)
+        factory = engine if engine is not None else Game
+        self._game = factory(self.config, rewards=rewards)
         self._opponents: dict[int, Any] = {}
 
         planes = n_players + 1
