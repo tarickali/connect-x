@@ -439,8 +439,15 @@ Derive everything variant-specific in `reset(config)` rather than `__init__`, so
 one instance can play any variant — that is what makes it measurable in a sweep.
 
 **A new game.** Implement the `connectx.engine.GameEngine` protocol in a new
-class. The arena, adapters, and recorders program against that protocol, so pop
-moves, free placement, obstacles, or different gravity all plug straight in.
+class — that is the intended route for pop moves, free placement, obstacles, or
+different gravity.
+
+Be aware the seam is not finished. Nothing consumes `GameEngine` yet: the arena,
+both adapters, the benchmarks, and the CLI all construct `Game` directly, and
+`Trajectory.replay` rebuilds positions with the gravity-based `place_token`, so
+a free-placement game would replay incorrectly. Those call sites need routing
+through an engine factory before a second game works end to end. See
+[todo.md](todo.md) for the plan.
 
 **A new preset.** Add it to `connectx.config.PRESETS`.
 

@@ -1,8 +1,84 @@
 # Todo List
 
-## Next up
+## 0. Before serious research runs start
 
-### 1. Neural agent and an AlphaZero-style loop
+Small, and each one is painful to retrofit once results exist.
+
+- [ ] **Record provenance in every result.** Today a JSONL record holds the
+      config, the specs, and the numbers — but **not the seed**, so a result
+      cannot be reproduced from its own record. Add seed, UTC timestamp, git
+      SHA, `connectx.__version__`, and the numpy/numba versions to
+      `MatchResult.to_dict`, `TournamentResult.to_dict`, and the surface
+      records. This is the single highest-value item on this page: in three
+      months there will be forty result files and no way to tell which code
+      produced them.
+- [ ] **Sample-size helper.** `games_needed(elo_gap, confidence)` — a run that
+      cannot resolve the difference it is looking for is wasted compute. The
+      Wilson machinery for it is already in `connectx.arena`.
+- [ ] **Resumable long runs.** A sweep that dies at variant 11 of 12 should not
+      restart from zero. Append records as each variant finishes and skip
+      variants already present in the output file.
+
+## 1. Finish the GameEngine seam
+
+Prerequisite for every new game below, and currently overstated in the docs.
+
+- [ ] Nothing consumes `GameEngine`: `arena.play_game`, both adapters,
+      `benchmark`, and `cli` all construct the concrete `Game`. Route them
+      through an engine factory (`engine=Game` by default).
+- [ ] `Trajectory.replay` reconstructs positions with the gravity-based
+      `place_token`, so a free-placement game would replay *wrong* rather than
+      fail loudly. Replay must go through the engine that produced the episode.
+      `dataset.build_supervised` inherits this, so it would silently generate
+      mislabelled training data.
+- [ ] Action-space assumptions: `encoding.mirror_action(action, cols)` is
+      column-indexed. Free placement needs a 2D mirror, and the policy-head
+      width becomes `rows * cols` rather than `cols`.
+- [ ] `Config` is fixed at `shape`/`k`/`players`. New dynamics need extra
+      fields (gravity on/off, exact-`k` vs overlines, stones per turn), so
+      `validate_config` needs to be extensible rather than closed.
+- [ ] Add a conformance test suite any `GameEngine` must pass, so a new game is
+      verified against the protocol rather than by inspection.
+
+## 2. Rule diversity: the m,n,k family
+
+Today every variant is *one* game with three scalar knobs — shape, `k`, and
+player count. That is real diversity for **scale** generalization, and the
+surface result shows it produces findings. It is not diversity of **dynamics**:
+every variant shares gravity, a column-sized action space, no removal, and one
+stone per turn. Ordered by cost.
+
+- [ ] **Misère** (making `k` in a row *loses*). One flag flipping the reward
+      sign; no engine change at all. Genuinely different optimal play, so it is
+      by far the cheapest real rule-generalization axis available.
+- [ ] **Obstacles / blocked cells.** Pre-fill cells with a reserved token that
+      belongs to no player. Cheap, and changes board geometry without touching
+      dynamics.
+- [ ] **Free placement** (`gravity=False`) — the big unlock. Action space
+      becomes `rows * cols`. Gets tic-tac-toe, **Gomoku** (15x15, k=5), and the
+      general m,n,k game. Needs section 1 done first: Gomoku is *not*
+      expressible today, because `Game` drops tokens down columns.
+- [ ] **Gomoku rule details** once free placement exists: exact-`k` versus
+      overlines (whether six in a row counts as a win), and optionally an
+      opening rule such as swap2, since plain 15x15 Gomoku is a first-player
+      win and heavily seat-biased.
+- [ ] **Connect6** — free placement, two stones per turn after the first move.
+      Introduces variable moves-per-turn, which the `StepResult` shape and the
+      PettingZoo adapter both currently assume away.
+- [ ] **Pop Out / Pop 10** — gravity plus removal from the bottom. Action space
+      roughly doubles (drop *or* pop) and the grid mutates below existing
+      pieces, which breaks the "tokens never move once placed" assumption that
+      incremental win detection relies on.
+- [ ] **Pente** — free placement plus custodian capture. Removal again, plus a
+      second win condition (capture count), so `Report` needs to carry more than
+      a line.
+- [ ] **Order and Chaos / Wild** — either player may place either token. Action
+      space doubles and the two seats have different objectives, which breaks
+      the zero-sum assumption baked into `RewardSpec` defaults and negamax.
+
+## 3. Next up
+
+### 3.1 Neural agent and an AlphaZero-style loop
 
 The gate on everything this project exists to measure. All the scaffolding is
 already in place — `connectx.encoding` emits perspective-relative planes whose
@@ -22,9 +98,9 @@ with mirror augmentation.
       `opponent=` without special-casing.
 - [ ] MCTS guided by the network (replace random rollouts with the value head).
 
-### 2. The generalization matrix
+### 3.2 The generalization matrix
 
-The headline result. Needs (1) first.
+The headline result. Needs 3.1 first.
 
 - [ ] Train on variant A, evaluate on the whole grid, plot the transfer heatmap.
 - [ ] Compare against the algorithmic baseline surface already produced by
@@ -33,7 +109,7 @@ The headline result. Needs (1) first.
       count are different kinds of distribution shift and probably behave
       differently.
 
-### 3. Measurement improvements
+### 3.3 Measurement improvements
 
 - [ ] Equal-*time* rather than equal-depth matchups as the default comparison.
       `MinimaxAgent(time_limit=...)` and `MCTSAgent(time_limit=...)` already
@@ -47,16 +123,13 @@ The headline result. Needs (1) first.
 - [ ] A solved-position oracle for small variants, to measure *absolute* rather
       than relative strength.
 
-### 4. Engine and agents
+### 3.4 Engine and agents
 
 - [ ] Zobrist hashing to replace `grid.tobytes()` transposition-table keys.
 - [ ] `max^n` or paranoid search, so multiplayer variants get a strong
       non-Monte-Carlo baseline.
 - [ ] Opening book.
 - [ ] Optional PyGame renderer (`connectx.renderer` is the seam).
-- [ ] Variants with different transition rules — Pop Out, Pop 10, Power Up — as
-      separate `GameEngine` implementations.
-- [ ] Other m,n,k games: Gomoku, Connect6, Pente.
 
 ## Deliberately deferred
 

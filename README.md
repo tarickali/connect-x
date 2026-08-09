@@ -244,10 +244,17 @@ Classic Connect 4 is `shape=(6, 7)`, `k=4`, `players=[1, 2]`. Presets: `tiny`,
 
 ## Extending
 
-`connectx.engine.GameEngine` is the seam. Implement it and the arena, adapters,
-recorders, and dataset tooling all work unchanged — which is how the wider
-*m,n,k* family (Gomoku, Connect6, Pente) and the Connect 4 rule variants (Pop
-Out, Pop 10, Power Up) are meant to be added.
+`connectx.engine.GameEngine` describes the interface a game must present, and
+`Game` implements it. It is the intended seam for the wider *m,n,k* family
+(Gomoku, Connect6, Pente) and the Connect 4 rule variants (Pop Out, Pop 10,
+Power Up).
+
+**It is not load-bearing yet.** Every consumer — `arena.play_game`, both
+adapters, `benchmark`, the CLI — currently constructs the concrete `Game`
+directly, and `Trajectory.replay` reconstructs positions with the gravity-based
+`place_token`. A second engine with different dynamics needs those call sites
+taken through a factory first. Tracked in [todo.md](todo.md); do not assume a
+new `GameEngine` implementation drops in unchanged today.
 
 Adding an agent is smaller: subclass `BaseAgent`, implement `select`, register
 it. Derive variant-specific state in `reset(config)` rather than `__init__` so a
