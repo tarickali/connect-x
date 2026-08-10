@@ -46,13 +46,13 @@ Do not take this document's word for anything. Everything below is checkable:
 ```bash
 pip install -e ".[dev]"
 
-pytest                                   # 397 tests, ~2 s
+pytest                                   # 403 tests, ~2 s
 pytest --cov --cov-report=term-missing   # see the coverage caveat below
 ruff check connectx agents tests recipes scripts
 ruff format --check connectx agents tests recipes scripts
 mypy                                     # 30 source files, clean
 
-NUMBA_DISABLE_JIT=1 pytest               # all 397 still pass; numba is a pure accelerator
+NUMBA_DISABLE_JIT=1 pytest               # all 403 still pass; numba is a pure accelerator
 ```
 
 **Coverage caveat, read this before you look at the numbers.** `coverage.py`
@@ -176,7 +176,7 @@ with the most suspicion. Specifically:
 adapters pass PettingZoo's `api_test` and Gymnasium's `check_env` — see
 `tests/test_adapters.py`.
 
-### 7. Tests (2,519 lines, 397 tests)
+### 7. Tests (2,519 lines, 403 tests)
 
 | File | Tests | Read it for |
 | --- | ---: | --- |
@@ -221,6 +221,7 @@ want to confirm a fix is real, check out the parent commit and run the repro.
 | 10 | `Trajectory.replay` **assumed gravity** | Would silently mislabel training data for any other game | `test_engine_conformance.py::TestRecording` |
 | 11 | `GameEngine` was **decorative** | Nothing consumed it; every caller built `Game` directly | `test_engine_conformance.py` + `engine=` everywhere |
 | 12 | Results **recorded no seed** | A record could not reproduce itself | `test_results.py::TestResultProvenance` |
+| 13 | `isinstance(x, GameEngine)` **raised** on Python <= 3.11 | CI red on 3.10/3.11, green on 3.12+; `hasattr` evaluates the `state` property, which raises before `start()` | `test_engine_conformance.py::TestProtocol::test_protocol_check_survives_an_unstarted_engine` |
 
 Measured effects of 8 and 9:
 
@@ -301,11 +302,18 @@ Everything else is 94–100%.
 independently and anchored to the same mean. The tables say so, but it is an
 easy mistake to make when reading a surface.
 
-**7. The PettingZoo adapter emits two upstream warnings** about `Dict`
+**7. Use `implements_engine`, not `isinstance`, against `GameEngine`.** On
+Python 3.11 and earlier, `isinstance` against a runtime-checkable protocol calls
+`hasattr` on every member, which evaluates properties — and `Game.state` raises
+before `start()`. `implements_engine` inspects the type statically and behaves
+identically on every version. This is the one cross-version landmine found so
+far, and it was found by CI rather than by me.
+
+**8. The PettingZoo adapter emits two upstream warnings** about `Dict`
 observation spaces. Benign — PettingZoo's own classic environments trigger the
 same — but they will show up in your logs.
 
-**8. `VecGame` has no agent interface.** It is a raw batched stepper; you drive
+**9. `VecGame` has no agent interface.** It is a raw batched stepper; you drive
 it with your own policy. Intentional, but it means the agent ladder does not run
 inside it.
 
@@ -371,7 +379,7 @@ overclaimed and how it was caught.
 
 A suggested order for your own pass. Roughly a day if you read carefully.
 
-- [ ] `pip install -e ".[dev]"`, then `pytest` — 397 tests should pass in ~2 s.
+- [ ] `pip install -e ".[dev]"`, then `pytest` — 403 tests should pass in ~2 s.
 - [ ] `NUMBA_DISABLE_JIT=1 pytest --cov --cov-report=term-missing` — the honest
       coverage picture (95%).
 - [ ] Read `connectx/types.py` and `connectx/engine.py`. Confirm the seat/token
@@ -389,8 +397,9 @@ A suggested order for your own pass. Roughly a day if you read carefully.
 - [ ] Run `connectx bench` and `python scripts/ablation.py` and check the
       numbers match the README on your hardware.
 - [ ] Skim `CHANGELOG.md` for the retractions.
-- [ ] Check GitHub Actions is green — I could not verify it from here, since the
-      `gh` CLI in this environment had stale credentials.
+- [ ] Check GitHub Actions is green. The first run was red on Python 3.10 and
+      3.11 only; see bug 13. The matrix now covers 3.10-3.14 and runs the suite
+      twice per version, with and without the JIT.
 - [ ] Read `todo.md` sections 2 and 3, and decide the PyTorch/JAX question.
 
 When you find something wrong — and on 2,300 lines of new code you will —

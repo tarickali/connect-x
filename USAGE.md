@@ -490,12 +490,27 @@ one instance can play any variant — that is what makes it measurable in a swee
 class — that is the intended route for pop moves, free placement, obstacles, or
 different gravity.
 
-Be aware the seam is not finished. Nothing consumes `GameEngine` yet: the arena,
-both adapters, the benchmarks, and the CLI all construct `Game` directly, and
-`Trajectory.replay` rebuilds positions with the gravity-based `place_token`, so
-a free-placement game would replay incorrectly. Those call sites need routing
-through an engine factory before a second game works end to end. See
-[todo.md](todo.md) for the plan.
+Everything in the harness takes an `engine=` factory, so a new implementation
+drops in without touching the arena, adapters, recorders, or dataset tooling.
+Check yours against the contract:
+
+```python
+from connectx import implements_engine
+implements_engine(MyGame)      # True when every protocol member is present
+```
+
+Use `implements_engine` rather than `isinstance(x, GameEngine)`: on Python 3.11
+and earlier, `isinstance` against a runtime-checkable protocol evaluates
+properties, and an engine that raises before `start()` makes it blow up.
+
+Then add `("MyGame", MyGame, config)` to `ENGINES` in
+`tests/test_engine_conformance.py` and run `pytest
+tests/test_engine_conformance.py` — 73 checks per engine, covering the protocol,
+state isolation, outcomes, recording and replay, and live integration with
+`play_match` and `build_supervised`.
+
+Free placement additionally needs a 2D mirror in `connectx.encoding` and extra
+`Config` fields; see [todo.md](todo.md).
 
 **A new preset.** Add it to `connectx.config.PRESETS`.
 
@@ -504,7 +519,7 @@ through an engine factory before a second game works end to end. See
 ## Development
 
 ```bash
-pytest                          # 397 tests
+pytest                          # 403 tests
 pytest -m "not rl"              # skip tests needing the [rl] extra
 pytest --cov --cov-report=term-missing
 ruff check connectx agents tests recipes scripts

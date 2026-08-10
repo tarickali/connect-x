@@ -20,12 +20,22 @@
   argument instead of importing `Game`.
 - `GameEngine.action_space_size`, so policy widths come from the engine rather
   than assuming one action per column. `build_supervised` uses it.
+- `connectx.implements_engine` and `connectx.protocol_members`, the
+  version-independent way to check an engine against the protocol.
 - `tests/test_engine_conformance.py` — a dynamics-agnostic contract suite. Add a
   new game to `ENGINES` and it is checked against the protocol, the arena, and
   the dataset pipeline.
 
 ### Fixed
 
+- **`isinstance(x, GameEngine)` raised on Python 3.11 and earlier.** A
+  runtime-checkable protocol check calls `hasattr` on every member, which
+  evaluates properties; `Game.state` raises before `start()`, so the check blew
+  up instead of returning a bool. Python 3.12 switched to
+  `inspect.getattr_static` and was unaffected, which is why CI was red on 3.10
+  and 3.11 only. Added `connectx.implements_engine`, which inspects the type
+  statically and behaves the same on every version, and documented the pitfall
+  on the protocol.
 - `Trajectory.replay` rebuilt positions with the gravity-based `place_token`
   rather than replaying through the engine, so a game with different placement
   rules would have replayed *wrong* rather than failed — silently mislabelling
@@ -54,6 +64,10 @@
 
 ### Changed
 
+- CI now covers Python 3.10 through 3.14 (3.14 was the development version but
+  went untested), runs the suite a second time with `NUMBA_DISABLE_JIT=1` to
+  prove the claim that numba is a pure accelerator, and uses action versions
+  that run on Node 24.
 - `MCTSAgent` is ~2x faster with identical move selection. Profiling showed only
   ~28% of a search was inside the compiled rollout; the rest was Python tree
   overhead. Backup vectors are now precomputed per outcome in `reset` instead of
