@@ -72,7 +72,11 @@ def _coerce(value: str) -> Any:
 
 
 def make_agent(
-    spec: str, config: Config | None = None, *, seed: int | None = None
+    spec: str,
+    config: Config | None = None,
+    *,
+    seed: int | None = None,
+    engine: Any = None,
 ) -> BaseAgent:
     """Build an agent from a ``name:key=value,key=value`` spec.
 
@@ -84,6 +88,10 @@ def make_agent(
 
     Keeping construction stringly-typed lets experiment configs, CLI flags, and
     result files all refer to an agent the same way.
+
+    ``engine`` is the factory search agents build their private lookahead engine
+    from. Pass the engine the game is actually being played on, or the agent
+    will search a different game than the one it is playing.
     """
     name, _, raw_options = spec.partition(":")
     name = name.strip()
@@ -99,6 +107,6 @@ def make_agent(
             )
         options[key.strip()] = _coerce(value.strip())
 
-    agent = REGISTRY[name](config, seed=seed, **options)
+    agent = REGISTRY[name](config, seed=seed, engine=engine, **options)
     agent._name = spec  # keep the full spec for result tables
     return agent

@@ -6,12 +6,15 @@ generalization of UCT, so this agent works unchanged on three- and four-player
 variants where negamax does not apply — which matters, because otherwise the
 multi-player configs would have no strong baseline to measure against.
 
+The tree is walked with a single :class:`agents.search.Position` cursor: the
+search pushes moves on the way down and pops them on the way back, so nodes
+store an action rather than a board and the agent never assumes how a move is
+applied. Playouts use the engine's compiled ``rollout`` when it offers one and
+step the engine otherwise.
+
 The tree itself is plain Python, and profiling showed that is where the time
-goes: only about a quarter of a search is spent inside the compiled rollout.
-So the hot paths here avoid per-simulation allocation — reward vectors are
-precomputed per winning token in :meth:`reset`, node statistics are Python
-floats rather than one-element-at-a-time numpy arrays, and expansion reuses a
-single legality mask instead of rebuilding index arrays.
+goes, so the hot paths avoid per-simulation allocation: reward vectors are
+precomputed per outcome in :meth:`reset` and node statistics are Python floats.
 """
 
 from __future__ import annotations
@@ -19,20 +22,17 @@ from __future__ import annotations
 import math
 import time
 
-import numpy as np
-
-import connectx.functional as cxf
-from agents.heuristics import column_order
-from agents.rollout import playout, seed_rng
+from agents.heuristics import centre_out_order
+from agents.search import Position
 from agents.types import BaseAgent
-from connectx.types import Action, Actions, Config, Grid, State
+from connectx.engine import GameEngine
+from connectx.types import Action, Actions, Config, State
 
 __all__ = ["MCTSAgent"]
 
 
 class _Node:
     __slots__ = (
-        "grid",
         "seat",
         "parent",
         "action",
@@ -40,22 +40,20 @@ class _Node:
         "untried",
         "visits",
         "values",
-        "terminal_token",
+        "winner_seat",
         "is_terminal",
     )
 
     def __init__(
         self,
-        grid: Grid,
         seat: int,
         parent: _Node | None,
         action: int | None,
         untried: list[int],
         n_players: int,
-        terminal_token: int,
+        winner_seat: int,
         is_terminal: bool,
     ) -> None:
-        self.grid = grid
         self.seat = seat
         self.parent = parent
         self.action = action
@@ -65,7 +63,7 @@ class _Node:
         # A Python list, not an ndarray: these are updated once per node per
         # simulation, where numpy's per-call overhead dwarfs the arithmetic.
         self.values: list[float] = [0.0] * n_players
-        self.terminal_token = terminal_token
+        self.winner_seat = winner_seat  # -1 when nobody has won
         self.is_terminal = is_terminal
 
 
@@ -89,57 +87,52 @@ class MCTSAgent(BaseAgent):
         self.last_visits: dict[int, int] = {}
         self._k = 0
         self._order: list[int] = []
-        self._players: np.ndarray = np.zeros(0, dtype=np.uint8)
+        self._players: list[int] = []
         self._n_players = 0
         self._payoffs: dict[int, list[float]] = {}
+        self._search: GameEngine | None = None
         super().__init__(config, **kwargs)
 
     def reset(self, config: Config) -> None:
         super().reset(config)
         self._k = int(config["k"])
-        # Held as a Python list; it is walked once per expansion and per
-        # selection, and numpy scalar unboxing is not free at that rate.
-        self._order = [int(c) for c in column_order(int(config["shape"][1]))]
-        self._players = np.array(config["players"], dtype=np.uint8)
-        self._n_players = len(config["players"])
+        self._search = self.engine_factory(config, undo=True)
+        self._order = centre_out_order(self._search.action_space_size)
+        self._players = [int(p) for p in config["players"]]
+        self._n_players = len(self._players)
 
         # Precompute the backup vector for every outcome, so a simulation never
         # allocates. Losses share the win evenly, keeping the game zero-sum for
-        # any number of seats.
+        # any number of seats. Keyed by winning seat; -1 is a draw.
         loss = -1.0 / max(self._n_players - 1, 1)
-        self._payoffs = {0: [0.0] * self._n_players}
-        for seat, token in enumerate(config["players"]):
+        self._payoffs = {-1: [0.0] * self._n_players}
+        for seat in range(self._n_players):
             payoff = [loss] * self._n_players
             payoff[seat] = 1.0
-            self._payoffs[int(token)] = payoff
+            self._payoffs[seat] = payoff
 
     # ------------------------------------------------------------------
 
     def select(self, state: State, actions: Actions) -> Action:
-        if self.config is None:
+        if self.config is None or self._search is None:
             raise RuntimeError(
                 "MCTSAgent needs a config; pass one to the constructor or call reset()."
             )
-        grid = np.ascontiguousarray(state["grid"], dtype=np.uint8)
-        legal = [column for column in self._order if actions[column] == 1]
+        position = Position(self._search, state)
+        legal = position.legal_ordered(self._order)
         if not legal:
             raise ValueError("no legal actions available")
         if len(legal) == 1:
             self.last_visits = {legal[0]: 0}
             return legal[0]
 
-        # Drive numba's RNG from this agent's generator, keeping runs reproducible.
-        seed_rng(int(self.rng.integers(1, 2**31 - 1)))
-
-        seat = int(state["info"]["active"])
         root = _Node(
-            grid=grid,
-            seat=seat,
+            seat=position.seat,
             parent=None,
             action=None,
-            untried=legal,
+            untried=list(legal),
             n_players=self._n_players,
-            terminal_token=0,
+            winner_seat=-1,
             is_terminal=False,
         )
 
@@ -150,10 +143,7 @@ class MCTSAgent(BaseAgent):
         while simulation < self.simulations:
             if deadline is not None and time.perf_counter() >= deadline:
                 break
-            node = self._select_leaf(root)
-            if not node.is_terminal and node.untried:
-                node = self._expand(node)
-            self._backpropagate(node, self._simulate(node))
+            self._simulate_once(position, root)
             simulation += 1
 
         self.last_visits = {a: c.visits for a, c in root.children.items()}
@@ -165,15 +155,59 @@ class MCTSAgent(BaseAgent):
 
     # ------------------------------------------------------------------
 
-    def _legal_ordered(self, grid: Grid) -> list[int]:
-        """Centre-out legal columns, from one mask rather than three arrays."""
-        mask = cxf.generate_actions(grid)
-        return [column for column in self._order if mask[column] == 1]
+    def _simulate_once(self, position: Position, root: _Node) -> None:
+        """One selection / expansion / playout / backup pass.
 
-    def _select_leaf(self, node: _Node) -> _Node:
-        while not node.is_terminal and not node.untried and node.children:
-            node = self._best_child(node)
-        return node
+        The cursor is left exactly where it started, whatever happens.
+        """
+        node = root
+        try:
+            # Selection: descend while the node is fully expanded.
+            while not node.is_terminal and not node.untried and node.children:
+                node = self._best_child(node)
+                action = node.action
+                if action is None:  # only the root has no action
+                    break
+                position.push(action)
+
+            # Expansion.
+            if not node.is_terminal and node.untried:
+                action = node.untried.pop(0)
+                position.push(action)
+                winner = position.winner_seat()
+                terminal = position.terminal()
+                node = self._attach(position, node, action, winner, terminal)
+
+            # Simulation.
+            if node.is_terminal:
+                outcome = node.winner_seat
+            else:
+                result = position.playout(self.rng, self.greedy_rollouts)
+                outcome = -1 if result is None else result
+
+            self._backpropagate(node, self._payoffs[outcome])
+        finally:
+            position.unwind()
+
+    def _attach(
+        self,
+        position: Position,
+        parent: _Node,
+        action: int,
+        winner: int | None,
+        terminal: bool,
+    ) -> _Node:
+        child = _Node(
+            seat=position.seat,
+            parent=parent,
+            action=action,
+            untried=[] if terminal else position.legal_ordered(self._order),
+            n_players=self._n_players,
+            winner_seat=-1 if winner is None else winner,
+            is_terminal=terminal,
+        )
+        parent.children[action] = child
+        return child
 
     def _best_child(self, node: _Node) -> _Node:
         exploration = self.exploration
@@ -192,41 +226,6 @@ class MCTSAgent(BaseAgent):
                 best_score = score
                 best = child
         return best
-
-    def _expand(self, node: _Node) -> _Node:
-        column = node.untried.pop(0)
-        token = self._players[node.seat]
-        row = cxf.drop_row(node.grid, column)
-        grid = cxf.place_token(node.grid, token, column)
-        winner_token = int(cxf.winner_at(grid, self._k, row, column))
-        is_terminal = winner_token != 0 or cxf.full(grid)
-        child = _Node(
-            grid=grid,
-            seat=(node.seat + 1) % self._n_players,
-            parent=node,
-            action=column,
-            untried=[] if is_terminal else self._legal_ordered(grid),
-            n_players=self._n_players,
-            terminal_token=winner_token,
-            is_terminal=is_terminal,
-        )
-        node.children[column] = child
-        return child
-
-    def _simulate(self, node: _Node) -> list[float]:
-        if node.is_terminal:
-            token = node.terminal_token
-        else:
-            token = int(
-                playout(
-                    node.grid,
-                    self._k,
-                    self._players,
-                    node.seat,
-                    self.greedy_rollouts,
-                )
-            )
-        return self._payoffs[token]
 
     def _backpropagate(self, node: _Node | None, payoff: list[float]) -> None:
         seats = range(self._n_players)

@@ -13,7 +13,7 @@ import numpy as np
 from connectx.functional import GRID_ARG
 from connectx.types import Grid
 
-__all__ = ["window_score", "center_score", "evaluate", "column_order"]
+__all__ = ["window_score", "center_score", "evaluate", "centre_out_order"]
 
 #: Extra credit for a window that is one token away from completing.
 _THREAT_BONUS = 40.0
@@ -93,13 +93,14 @@ def evaluate(grid: Grid, k: int, own: np.uint8, opponent: np.uint8) -> float:
     return window_score(grid, k, own, opponent) + 2.0 * center_score(grid, own, opponent)
 
 
-def column_order(cols: int) -> np.ndarray:
-    """Centre-out column ordering.
+def centre_out_order(action_space_size: int) -> list[int]:
+    """Centre-out ordering over an action space.
 
     Searching the middle first makes alpha-beta cut off far earlier, because
-    good moves cluster there.
+    good moves cluster there. For a drop game the action index *is* the column,
+    so this is exactly centre-column-first. For a free-placement game it orders
+    by distance from the middle of the flattened board, which is a weaker but
+    still sensible prior — replace it with a game-specific order if you have one.
     """
-    center = (cols - 1) / 2.0
-    return np.array(
-        sorted(range(cols), key=lambda c: (abs(c - center), c)), dtype=np.int64
-    )
+    centre = (action_space_size - 1) / 2.0
+    return sorted(range(action_space_size), key=lambda a: (abs(a - centre), a))

@@ -201,7 +201,10 @@ def play_game(
     agents = []
     for seat in range(n_players):
         agent = make_agent(
-            specs[order[seat]], config, seed=_derive_seed(seed, game_index, seat)
+            specs[order[seat]],
+            config,
+            seed=_derive_seed(seed, game_index, seat),
+            engine=engine,
         )
         agent_reset(agent, config)
         agents.append(agent)

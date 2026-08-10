@@ -152,7 +152,11 @@ class Game:
         )
 
         self._info["time"] += 1
-        self._info["active"] = self._info["time"] % len(self._config["players"])
+        # Advance from the seat that just moved, not from the clock. Deriving it
+        # as `time % n_players` silently discarded the `active` a resumed state
+        # was started with, so any position where the two disagreed corrected
+        # itself on the next move.
+        self._info["active"] = (player_index + 1) % len(self._config["players"])
 
         self._actions = cxf.generate_actions(self._grid)
 
@@ -334,6 +338,25 @@ class Game:
             config=self._config,
             steps=list(self._trajectory_steps),
             report=self.report() if self._info is not None else None,
+        )
+
+    def rollout(self, *, seed: int = 0, greedy: bool = True) -> int:
+        """Play to the end from here at random; return the winning token, 0 for a draw.
+
+        Optional engine capability: :class:`agents.search.Position` uses it for
+        Monte Carlo playouts when present, and steps the engine move by move
+        otherwise. This game's own state is not changed.
+        """
+        from agents.rollout import playout, seed_rng
+
+        if self._grid is None or self._info is None:
+            raise RuntimeError("Call start() before rollout().")
+        if self.terminal():
+            return self._winner_token
+        seed_rng(int(seed))
+        players = np.array(self._config["players"], dtype=np.uint8)
+        return int(
+            playout(self._grid, self._config["k"], players, self._info["active"], greedy)
         )
 
     def render(self) -> None:

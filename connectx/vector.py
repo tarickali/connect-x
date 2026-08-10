@@ -74,7 +74,8 @@ def _step_kernel(
             winners[env] = found
 
         times[env] += 1
-        actives[env] = times[env] % n_players
+        # Advance from the current seat rather than the clock, matching Game.
+        actives[env] = (actives[env] + 1) % n_players
         if winners[env] != 0 or filled[env] >= cells:
             done[env] = True
     return done

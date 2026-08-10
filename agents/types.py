@@ -14,7 +14,7 @@ they need from the config handed to them at the start of each episode.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -49,13 +49,27 @@ class BaseAgent(ABC):
         *,
         seed: int | None = None,
         name: str | None = None,
+        engine: Any = None,
     ) -> None:
         self._name = name or type(self).__name__
         self.config: Config | None = None
         self.rng: np.random.Generator = np.random.default_rng(seed)
         self._seed = seed
+        # Search agents build a private engine to explore with. Taking it as a
+        # parameter is what lets one agent play any game, rather than only the
+        # drop game whose primitives it happened to import.
+        self._engine_factory = engine
         if config is not None:
             self.reset(config)
+
+    @property
+    def engine_factory(self) -> Any:
+        """Factory used to build private search engines. Defaults to the drop game."""
+        if self._engine_factory is None:
+            from agents.search import default_engine
+
+            return default_engine()
+        return self._engine_factory
 
     @property
     def name(self) -> str:
