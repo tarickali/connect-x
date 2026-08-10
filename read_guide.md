@@ -13,6 +13,7 @@ explicit about what I decided, what I got wrong, and what you should distrust.
 - [Claims made in the docs, and their evidence](#claims-made-in-the-docs-and-their-evidence)
 - [Commit-by-commit history](#commit-by-commit-history)
 - [Review checklist](#review-checklist)
+- [Keeping this guide honest](#keeping-this-guide-honest)
 
 ---
 
@@ -82,7 +83,7 @@ the ones above it.
 | File | Lines | Why first |
 | --- | ---: | --- |
 | `connectx/types.py` | 76 | Every other module speaks these types. `Config`, `State`, `Report`, `RewardSpec`, `StepResult`. |
-| `connectx/engine.py` | 76 | `GameEngine`, the protocol a game must satisfy. Read the class docstring for the factory contract. |
+| `connectx/engine.py` | 105 | `GameEngine`, the protocol a game must satisfy. Read the class docstring for the factory contract. |
 
 Read `types.py` closely. `Info["active"]` is a **seat index**, not a token;
 `config["players"][seat]` is the token. Almost every off-by-one risk in the
@@ -176,11 +177,11 @@ with the most suspicion. Specifically:
 adapters pass PettingZoo's `api_test` and Gymnasium's `check_env` — see
 `tests/test_adapters.py`.
 
-### 7. Tests (2,519 lines, 403 tests)
+### 7. Tests (2,533 lines, 403 tests)
 
 | File | Tests | Read it for |
 | --- | ---: | --- |
-| `tests/test_engine_conformance.py` | **73** | **The contract for a new game. Start here.** |
+| `tests/test_engine_conformance.py` | **79** | **The contract for a new game. Start here.** 26 of them run per engine. |
 | `tests/test_agents.py` | 41 | Regression tests for the minimax bug, at every depth |
 | `tests/test_game.py` | 41 | Engine semantics, state isolation, outcomes |
 | `tests/test_arena.py` | 32 | Statistics, seat balance, worker determinism |
@@ -198,7 +199,14 @@ adapters pass PettingZoo's `api_test` and Gymnasium's `check_env` — see
 
 If you read one test file, make it `test_engine_conformance.py` — it is the
 executable specification of what a game has to do, and it is how you will verify
-a Gomoku engine.
+a Gomoku engine. Adding `("MyGame", MyGame, config)` to `ENGINES` runs all 26
+per-engine checks against it.
+
+Note what that does **not** cover: `GreedyAgent`, `MinimaxAgent`, and
+`MCTSAgent` all call `drop_row` and `place_token` directly, so they only play
+drop games. A free-placement engine would pass conformance and have exactly one
+non-interactive agent able to play it (`RandomAgent`). Generalizing the ladder
+is part of section 2, not a freebie.
 
 ---
 
@@ -405,3 +413,50 @@ A suggested order for your own pass. Roughly a day if you read carefully.
 When you find something wrong — and on 2,300 lines of new code you will —
 `tests/` is the right place to start the fix, because almost every claim in this
 document is pinned by a test that would go red.
+
+---
+
+## Keeping this guide honest
+
+A review guide that lies about the codebase is worse than no guide, so the
+parts of it that can rot are machine-checked.
+
+```bash
+python scripts/check_guide.py         # report drift, exit 1 if any
+python scripts/check_guide.py --fix   # rewrite the numbers from reality
+```
+
+It re-derives the test counts, the conformance counts, the test line total, and
+every module size quoted in the reading-order tables, then diffs them against
+what the docs claim. It runs in CI, so a pull request that adds a module or a
+test and forgets the guide goes red.
+
+**What is volatile and gets checked automatically**
+
+| Fact | Where | Regenerate with |
+| --- | --- | --- |
+| Total test count | this file, `USAGE.md` | `--fix` |
+| Conformance counts | this file, `USAGE.md` | `--fix` |
+| Test line total | this file | `--fix` |
+| Module sizes | reading-order tables | `--fix` |
+
+**What is volatile and is *not* checked** — update these by hand:
+
+| Fact | Refresh with |
+| --- | --- |
+| Coverage percentages | `NUMBA_DISABLE_JIT=1 pytest --cov` |
+| Performance numbers | `connectx bench`, `python scripts/ablation.py` |
+| The commit table | `git log --oneline 6ac378f..HEAD` |
+| Per-file test counts | `for f in tests/test_*.py; do pytest "$f"; done` |
+
+Prose is not checkable and is not attempted. The sections most likely to go
+stale as *judgement* rather than as fact are
+[decisions you may want to overturn](#decisions-you-may-want-to-overturn) and
+[soft spots](#soft-spots-and-untested-corners) — when you fix a soft spot or
+reverse a decision, delete the entry rather than leaving it to mislead.
+
+**When you extend the project**, the entries worth adding are the ones this
+guide is built around: a bug you fixed and how you reproduced it, a decision you
+made that a future reader might reasonably disagree with, and anything you know
+is weak. Those are the parts that were useful to write and are impossible to
+recover later.

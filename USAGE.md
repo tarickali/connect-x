@@ -504,13 +504,24 @@ and earlier, `isinstance` against a runtime-checkable protocol evaluates
 properties, and an engine that raises before `start()` makes it blow up.
 
 Then add `("MyGame", MyGame, config)` to `ENGINES` in
-`tests/test_engine_conformance.py` and run `pytest
-tests/test_engine_conformance.py` — 73 checks per engine, covering the protocol,
+`tests/test_engine_conformance.py`. That runs **26 checks against your engine**
+(79 in the file, across three configurations of `Game`), covering the protocol,
 state isolation, outcomes, recording and replay, and live integration with
 `play_match` and `build_supervised`.
 
-Free placement additionally needs a 2D mirror in `connectx.encoding` and extra
-`Config` fields; see [todo.md](todo.md).
+**What that does not give you.** Conformance checks the contract, not the game.
+You will still need:
+
+- **Agents that can play it.** `GreedyAgent`, `MinimaxAgent`, and `MCTSAgent`
+  call `drop_row` and `place_token` directly, so they are hard-coded to drop
+  mechanics. Only `RandomAgent` and `HumanAgent` are engine-agnostic today. A
+  free-placement game passes conformance with exactly one usable baseline, which
+  is not enough to measure anything — generalizing the ladder is part of the
+  work, not a bonus.
+- Tests for your game's own rules. Conformance is deliberately dynamics-agnostic
+  and will not tell you that your capture rule is wrong.
+- For free placement specifically: a 2D mirror in `connectx.encoding` and extra
+  `Config` fields. See [todo.md](todo.md).
 
 **A new preset.** Add it to `connectx.config.PRESETS`.
 

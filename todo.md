@@ -26,7 +26,8 @@
       is not per-column.
 - [x] Confirmed `validate_config` passes unknown keys through, so a new game can
       carry extra config fields. Covered by a test.
-- [x] `tests/test_engine_conformance.py`: 73 dynamics-agnostic checks covering
+- [x] `tests/test_engine_conformance.py`: 79 dynamics-agnostic checks (26 per
+      engine) covering
       the protocol, state isolation, outcomes, recording, and integration with
       the arena and dataset pipeline. **Add a new game to `ENGINES` and it is
       checked automatically.**
@@ -35,6 +36,13 @@ Remaining for a *free-placement* game specifically (do with section 2):
 
 - [ ] 2D mirror for the free-placement action space.
 - [ ] `Config` fields for the new dynamics (`gravity`, exact-`k`, stones/turn).
+- [ ] **Generalize the agent ladder.** `GreedyAgent`, `MinimaxAgent`, and
+      `MCTSAgent` call `drop_row` and `place_token` directly, so they only play
+      drop games. `RandomAgent` and `HumanAgent` are already engine-agnostic. A
+      new engine therefore passes conformance while having only one usable
+      baseline — which is not enough to measure anything. Either route the
+      agents through the engine's `transition`, or give the engine a
+      `simulate(action)` hook cheap enough for search.
 
 ## 2. Rule diversity: the m,n,k family
 

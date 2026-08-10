@@ -77,6 +77,9 @@ jobs:
       - name: Mypy
         run: mypy
 
+      - name: Docs match the code
+        run: python scripts/check_guide.py
+
   smoke:
     name: cli smoke test
     runs-on: ubuntu-latest
