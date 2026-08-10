@@ -47,7 +47,7 @@ Do not take this document's word for anything. Everything below is checkable:
 ```bash
 pip install -e ".[dev]"
 
-pytest                                   # 403 tests, ~2 s
+pytest                                   # 513 tests, ~2 s
 pytest --cov --cov-report=term-missing   # see the coverage caveat below
 ruff check connectx agents tests recipes scripts
 ruff format --check connectx agents tests recipes scripts
@@ -95,7 +95,7 @@ codebase is that distinction.
 | --- | ---: | --- |
 | `connectx/config.py` | 90 | `validate_config` — the invariants everything else assumes. |
 | `connectx/functional.py` | 200 | Pure JIT primitives. Read `winner_at` and `winner_line`. |
-| `connectx/game.py` | 310 | Stateful `Game`. The interesting part is incremental winner tracking. |
+| `connectx/game.py` | 330 | Stateful `Game`. The interesting part is incremental winner tracking. |
 
 The one idea worth understanding: **`Game` tracks the winner incrementally.**
 `transition` gets the landing row from `drop_row`, plays the move, then calls
@@ -112,13 +112,14 @@ Check `tests/test_game.py::TestGameStateIsolation`.
 
 | File | Lines | Notes |
 | --- | ---: | --- |
-| `agents/types.py` | 84 | `Agent` protocol (just `select`) + `BaseAgent` (seeding, `reset`, `observe`). |
+| `agents/types.py` | 96 | `Agent` protocol (just `select`) + `BaseAgent` (seeding, `reset`, `observe`). |
 | `agents/random.py` | 16 | Read it — it shows the seeding convention. |
-| `agents/greedy.py` | 53 | Win / block / centre. Works for any player count. |
-| `agents/heuristics.py` | 88 | **Scrutinize.** The weights are hand-picked. |
-| `agents/minimax.py` | 190 | Negamax + alpha-beta + transposition table. Two players. |
+| `agents/greedy.py` | 58 | Win / block / centre. Works for any player count. |
+| `agents/search.py` | 163 | `Position`, the engine-agnostic push/pop cursor every search uses. |
+| `agents/heuristics.py` | 89 | **Scrutinize.** The weights are hand-picked. |
+| `agents/minimax.py` | 175 | Negamax + alpha-beta + transposition table. Two players. |
 | `agents/rollout.py` | 65 | JIT playout, the MCTS inner loop. |
-| `agents/mcts.py` | 210 | UCT with max^n backups. Any player count. |
+| `agents/mcts.py` | 204 | UCT with max^n backups. Any player count. |
 
 `minimax.py` is written as **negamax** rather than an explicit max/min pair
 specifically because the original bug was a mismatched
@@ -129,6 +130,12 @@ desynchronize. Worth confirming you find that convincing.
 `__init__`. An agent that takes its config at construction can only play one
 variant, which makes it unusable in a sweep.
 
+No agent touches the drop primitives any more. They build a private engine from
+`self.engine_factory` and walk it through `agents.search.Position`, which
+exposes only push / pop / legal / terminal / winner. That is what makes the
+ladder work on a game with different dynamics — and it is verified, not assumed:
+see `TestAgentsGeneralize` and `TestSolvedGameOracle`.
+
 ### 4. Data and training (~400 lines)
 
 | File | Lines | Notes |
@@ -136,7 +143,7 @@ variant, which makes it unusable in a sweep.
 | `connectx/trajectory.py` | 139 | Episodes stored as **move lists**, not boards. |
 | `connectx/encoding.py` | 67 | Perspective-relative planes, masks, mirror. |
 | `connectx/dataset.py` | 192 | Shards + `build_supervised`. |
-| `connectx/vector.py` | 173 | `VecGame`, batched stepping. |
+| `connectx/vector.py` | 174 | `VecGame`, batched stepping. |
 
 Two design points to check:
 
@@ -154,7 +161,7 @@ Two design points to check:
 | File | Lines | Notes |
 | --- | ---: | --- |
 | `connectx/results.py` | 106 | Provenance and JSONL. |
-| `connectx/arena.py` | 508 | Statistics, matches, tournaments, Elo. |
+| `connectx/arena.py` | 511 | Statistics, matches, tournaments, Elo. |
 | `connectx/variants.py` | 350 | Variant grids, sweeps, the generalization surface. |
 
 This is where a subtle bug would quietly corrupt months of results, so read it
@@ -177,11 +184,11 @@ with the most suspicion. Specifically:
 adapters pass PettingZoo's `api_test` and Gymnasium's `check_env` — see
 `tests/test_adapters.py`.
 
-### 7. Tests (2,533 lines, 403 tests)
+### 7. Tests (2,675 lines, 513 tests)
 
 | File | Tests | Read it for |
 | --- | ---: | --- |
-| `tests/test_engine_conformance.py` | **79** | **The contract for a new game. Start here.** 26 of them run per engine. |
+| `tests/test_engine_conformance.py` | **186** | **The contract for a new game. Start here.** 26 of them run per engine. |
 | `tests/test_agents.py` | 41 | Regression tests for the minimax bug, at every depth |
 | `tests/test_game.py` | 41 | Engine semantics, state isolation, outcomes |
 | `tests/test_arena.py` | 32 | Statistics, seat balance, worker determinism |
@@ -202,11 +209,11 @@ executable specification of what a game has to do, and it is how you will verify
 a Gomoku engine. Adding `("MyGame", MyGame, config)` to `ENGINES` runs all 26
 per-engine checks against it.
 
-Note what that does **not** cover: `GreedyAgent`, `MinimaxAgent`, and
-`MCTSAgent` all call `drop_row` and `place_token` directly, so they only play
-drop games. A free-placement engine would pass conformance and have exactly one
-non-interactive agent able to play it (`RandomAgent`). Generalizing the ladder
-is part of section 2, not a freebie.
+It also runs the **whole agent ladder** against every engine, so a new game
+gets working baselines rather than only a verified contract. `tests/free_placement.py`
+is there to keep that claim honest: an engine with no gravity and a
+`rows * cols` action space, which anything assuming "action index == column"
+fails on.
 
 ---
 
@@ -229,6 +236,7 @@ want to confirm a fix is real, check out the parent commit and run the repro.
 | 10 | `Trajectory.replay` **assumed gravity** | Would silently mislabel training data for any other game | `test_engine_conformance.py::TestRecording` |
 | 11 | `GameEngine` was **decorative** | Nothing consumed it; every caller built `Game` directly | `test_engine_conformance.py` + `engine=` everywhere |
 | 12 | Results **recorded no seed** | A record could not reproduce itself | `test_results.py::TestResultProvenance` |
+| 14 | `Game.transition` **discarded the seat a resumed state was started with** | It recomputed `active = time % n_players`, so any position where the two disagreed silently corrected itself on the next move | `test_game.py::TestGameStart::test_resumed_seat_is_honoured` |
 | 13 | `isinstance(x, GameEngine)` **raised** on Python <= 3.11 | CI red on 3.10/3.11, green on 3.12+; `hasattr` evaluates the `state` property, which raises before `start()` | `test_engine_conformance.py::TestProtocol::test_protocol_check_survives_an_unstarted_engine` |
 
 Measured effects of 8 and 9:
@@ -287,10 +295,12 @@ it — depends on them. This is the least-defensible code in the project.
 **2. MCTS `exploration = 1.4` is also unfitted**, and the right value depends on
 the reward scale, which changes if you change `RewardSpec`.
 
-**3. No ground truth for playing strength.** Agents are only ever measured
-against each other. Nothing verifies that `minimax:depth=4` plays *well* in an
-absolute sense. A solved-position oracle for small boards would fix this and is
-in `todo.md`.
+**3. Ground truth for playing strength is thin.** Agents are mostly measured
+against each other, which cannot tell you whether any of them play *well*. There
+is now one absolute check — `TestSolvedGameOracle` searches tic-tac-toe out at
+depth 9 and confirms perfect play draws every game and never loses to anything —
+but nothing comparable exists for the drop games, where the trees are too large
+to solve. A solved-position oracle for small drop boards is still in `todo.md`.
 
 **4. `_derive_seed` is an ad-hoc mixing function**, not a real hash:
 `(base * 1_000_003 + game_index * 9_176 + seat * 31) % (2**31 - 1)`. It is
@@ -310,18 +320,26 @@ Everything else is 94–100%.
 independently and anchored to the same mean. The tables say so, but it is an
 easy mistake to make when reading a surface.
 
-**7. Use `implements_engine`, not `isinstance`, against `GameEngine`.** On
+**7. Search costs ~2.7x more than it did.** Routing the agents through the
+engine made them general and slower: `minimax:depth=4` went from 0.32 ms to
+0.86 ms per move, `greedy` from 0.023 ms to 0.084 ms. Node counts are identical,
+so the search is unchanged — the cost is `Game.transition` being Python-bound
+(about 1.4 us of compiled work inside a 4.1 us call). Judged worth it, since
+these are baselines rather than the research target, but reverse the judgement
+if it ever bounds an experiment.
+
+**8. Use `implements_engine`, not `isinstance`, against `GameEngine`.** On
 Python 3.11 and earlier, `isinstance` against a runtime-checkable protocol calls
 `hasattr` on every member, which evaluates properties — and `Game.state` raises
 before `start()`. `implements_engine` inspects the type statically and behaves
 identically on every version. This is the one cross-version landmine found so
 far, and it was found by CI rather than by me.
 
-**8. The PettingZoo adapter emits two upstream warnings** about `Dict`
+**9. The PettingZoo adapter emits two upstream warnings** about `Dict`
 observation spaces. Benign — PettingZoo's own classic environments trigger the
 same — but they will show up in your logs.
 
-**9. `VecGame` has no agent interface.** It is a raw batched stepper; you drive
+**10. `VecGame` has no agent interface.** It is a raw batched stepper; you drive
 it with your own policy. Intentional, but it means the agent ladder does not run
 inside it.
 
@@ -355,7 +373,7 @@ mine could be wrong in the same way.
 
 ## Commit-by-commit history
 
-Seventeen commits, each independently green (verified by staging, stashing the
+Twenty-six commits, each independently green (verified by staging, stashing the
 rest, and running the suite). `git log --oneline 6ac378f..HEAD`.
 
 | Commit | What it did |
@@ -387,7 +405,7 @@ overclaimed and how it was caught.
 
 A suggested order for your own pass. Roughly a day if you read carefully.
 
-- [ ] `pip install -e ".[dev]"`, then `pytest` — 403 tests should pass in ~2 s.
+- [ ] `pip install -e ".[dev]"`, then `pytest` — 513 tests should pass in ~2 s.
 - [ ] `NUMBA_DISABLE_JIT=1 pytest --cov --cov-report=term-missing` — the honest
       coverage picture (95%).
 - [ ] Read `connectx/types.py` and `connectx/engine.py`. Confirm the seat/token

@@ -4,6 +4,25 @@
 
 ### Added
 
+- **The agent ladder plays any engine.** `GreedyAgent`, `MinimaxAgent`, and
+  `MCTSAgent` called the drop primitives directly, so a new engine could pass
+  the conformance suite and still have no baseline able to play it. They now
+  search through `agents.search.Position`, an engine-agnostic push/pop cursor,
+  and build their lookahead engine from an injected factory that `play_match`
+  threads through. `Game.rollout` exposes the compiled playout as an optional
+  capability; `Position` falls back to stepping the engine when an engine does
+  not offer one.
+- `tests/free_placement.py`, a free-placement m,n,k engine used as a fixture:
+  no gravity, a `rows * cols` action space, no compiled rollout. The conformance
+  suite runs the full contract and the whole agent ladder against it, so
+  "works with any engine" is tested rather than claimed.
+- A **solved-game oracle**: at 3x3 the free-placement engine is tic-tac-toe, and
+  `minimax:depth=9` is checked to draw itself every game and never lose to
+  anything. That is the project's first absolute measure of playing strength;
+  everything else is agents against each other.
+- `scripts/check_guide.py`, which re-derives the counts and module sizes the
+  docs quote and fails CI when they drift.
+
 - **Provenance on every result.** Records now carry the seed, a UTC timestamp,
   the git SHA and dirty flag, and the connectx/Python/numpy/numba versions. A
   record previously could not be reproduced from itself, because the seed that
@@ -28,6 +47,12 @@
 
 ### Fixed
 
+- **`Game.transition` discarded the seat a resumed state was started with.** It
+  recomputed `active` as `time % n_players`, so a position where the two
+  disagreed silently corrected itself on the next move — an agent searching from
+  such a position had the wrong side to move. It now advances from the seat that
+  actually moved. `VecGame` had the same rule and the same fix. Found by routing
+  minimax through the engine, which the old direct-primitive search had masked.
 - **`isinstance(x, GameEngine)` raised on Python 3.11 and earlier.** A
   runtime-checkable protocol check calls `hasattr` on every member, which
   evaluates properties; `Game.state` raises before `start()`, so the check blew
@@ -64,6 +89,12 @@
 
 ### Changed
 
+- Search is about 2.7x slower now that it goes through the engine
+  (`minimax:depth=4` 0.32 ms -> 0.86 ms per move). Node counts are unchanged, so
+  the search itself is identical; the cost is `Game.transition` being
+  Python-bound. Judged a fair price for a ladder that works on any game.
+- Corrected a fourth documentation error: `games_needed(40)` is 596, not 874.
+  The wrong figure came from `games_needed(33)` measured elsewhere.
 - CI now covers Python 3.10 through 3.14 (3.14 was the development version but
   went untested), runs the suite a second time with `NUMBA_DISABLE_JIT=1` to
   prove the claim that numba is a pure accelerator, and uses action versions

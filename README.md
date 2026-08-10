@@ -1,7 +1,7 @@
 # connect-x
 
 [![CI](https://github.com/tarickali/connect-x/actions/workflows/ci.yml/badge.svg)](https://github.com/tarickali/connect-x/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.13-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.14-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
 A **parameterized family of Connect-style games** for training and evaluating AI
@@ -66,7 +66,7 @@ code:
 
 - **The 40-game version of this table said the opposite.** A coarser sweep put
   MCTS 42 Elo ahead on 5x6 k=3, and it was noise: 40 games can only resolve
-  ~160 Elo. `connectx.arena.games_needed(40)` says 874 games are needed to call
+  ~160 Elo. `connectx.arena.games_needed(40)` says 596 games are needed to call
   a 40 Elo difference, so the harness will now tell you before you spend the
   compute.
 - The comparison is equal-*budget*, not equal-time. `mcts:simulations=400` takes
@@ -99,7 +99,8 @@ that produced it.
 - **Standard APIs** — PettingZoo (AEC) and Gymnasium adapters, both passing
   their upstream conformance tests.
 - **An agent ladder** — random → greedy → alpha-beta minimax → UCT MCTS, so a
-  win rate means something.
+  win rate means something. Every agent plays through the engine interface, so
+  the ladder works on any game satisfying `GameEngine`, not just drop games.
 - **A measurement harness** — matches with Wilson intervals, round-robin
   tournaments with Elo, variant sweeps, generalization surfaces, sample-size
   planning, process parallelism, and resumable runs.
@@ -237,7 +238,7 @@ clean vectorized expression, it is a tie.
 
 Cost: ~155 MB of wheels, +0.16 s on a warm import, ~2 s cold, and coupling to
 numba's supported numpy range. Worth it at 14× on the workload this project
-actually runs. **All 275 tests pass under `NUMBA_DISABLE_JIT=1`** — numba is a
+actually runs. **The whole suite passes under `NUMBA_DISABLE_JIT=1`** — numba is a
 pure accelerator here, never load-bearing for behaviour, so the ablation is one
 environment variable and there is an escape hatch if it ever blocks an upgrade.
 
@@ -263,12 +264,16 @@ Classic Connect 4 is `shape=(6, 7)`, `k=4`, `players=[1, 2]`. Presets: `tiny`,
 (Gomoku, Connect6, Pente) and the Connect 4 rule variants (Pop Out, Pop 10,
 Power Up).
 
-**It is not load-bearing yet.** Every consumer — `arena.play_game`, both
-adapters, `benchmark`, the CLI — currently constructs the concrete `Game`
-directly, and `Trajectory.replay` reconstructs positions with the gravity-based
-`place_token`. A second engine with different dynamics needs those call sites
-taken through a factory first. Tracked in [todo.md](todo.md); do not assume a
-new `GameEngine` implementation drops in unchanged today.
+It is load-bearing: every consumer takes an `engine=` factory, `Trajectory`
+replays through the engine that recorded it, and the agent ladder searches with
+:class:`agents.search.Position` rather than the drop primitives.
+
+The claim is tested rather than asserted. `tests/free_placement.py` is a
+free-placement engine — no gravity, a `rows * cols` action space, no compiled
+rollout — and the conformance suite runs the full contract *and* the whole agent
+ladder against it. At 3x3 it is tic-tac-toe, where `minimax:depth=9` searches
+the game out and draws itself 40 times out of 40, which is the project's only
+absolute check on playing strength.
 
 Adding an agent is smaller: subclass `BaseAgent`, implement `select`, register
 it. Derive variant-specific state in `reset(config)` rather than `__init__` so a

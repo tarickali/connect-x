@@ -36,13 +36,17 @@ Remaining for a *free-placement* game specifically (do with section 2):
 
 - [ ] 2D mirror for the free-placement action space.
 - [ ] `Config` fields for the new dynamics (`gravity`, exact-`k`, stones/turn).
-- [ ] **Generalize the agent ladder.** `GreedyAgent`, `MinimaxAgent`, and
-      `MCTSAgent` call `drop_row` and `place_token` directly, so they only play
-      drop games. `RandomAgent` and `HumanAgent` are already engine-agnostic. A
-      new engine therefore passes conformance while having only one usable
-      baseline — which is not enough to measure anything. Either route the
-      agents through the engine's `transition`, or give the engine a
-      `simulate(action)` hook cheap enough for search.
+- [x] **Generalize the agent ladder.** Done: every agent searches through
+      `agents.search.Position` and builds its lookahead engine from an injected
+      factory, so the ladder plays any `GameEngine`. Verified against
+      `tests/free_placement.py` (no gravity, `rows * cols` actions), including a
+      solved-game check that `minimax:depth=9` draws tic-tac-toe every time.
+      Cost: search is ~2.7x slower, since `Game.transition` is Python-bound.
+- [ ] Claw back some of that 2.7x if it ever bounds an experiment. The compiled
+      work inside `Game.transition` is only ~1.4 us of a 4.1 us call; the rest
+      is validation, dict updates, and the defensive `state` property. A
+      trusted, non-defensive accessor for search would recover most of it, at
+      the cost of reintroducing the aliasing risk `state` exists to prevent.
 
 ## 2. Rule diversity: the m,n,k family
 

@@ -504,24 +504,30 @@ and earlier, `isinstance` against a runtime-checkable protocol evaluates
 properties, and an engine that raises before `start()` makes it blow up.
 
 Then add `("MyGame", MyGame, config)` to `ENGINES` in
-`tests/test_engine_conformance.py`. That runs **26 checks against your engine**
+`tests/test_engine_conformance.py`. That runs **31 checks against your engine**
 (79 in the file, across three configurations of `Game`), covering the protocol,
 state isolation, outcomes, recording and replay, and live integration with
 `play_match` and `build_supervised`.
 
-**What that does not give you.** Conformance checks the contract, not the game.
-You will still need:
+The suite also plays the **whole agent ladder** on your engine, so a new game
+arrives with working baselines rather than only a verified contract. Agents
+search through `agents.search.Position`, which knows nothing about how a move is
+applied.
 
-- **Agents that can play it.** `GreedyAgent`, `MinimaxAgent`, and `MCTSAgent`
-  call `drop_row` and `place_token` directly, so they are hard-coded to drop
-  mechanics. Only `RandomAgent` and `HumanAgent` are engine-agnostic today. A
-  free-placement game passes conformance with exactly one usable baseline, which
-  is not enough to measure anything — generalizing the ladder is part of the
-  work, not a bonus.
-- Tests for your game's own rules. Conformance is deliberately dynamics-agnostic
+`tests/free_placement.py` is a worked example: an m,n,k engine with no gravity
+and a `rows * cols` action space, in about 200 readable lines. At 3x3 it is
+tic-tac-toe, and the suite checks that `minimax:depth=9` searches it out and
+draws every game.
+
+**What conformance does not give you:**
+
+- Tests for your game's own rules. The suite is deliberately dynamics-agnostic
   and will not tell you that your capture rule is wrong.
+- A *fast* engine. `Position` uses `undo()` and `rollout()` when an engine
+  offers them and falls back to snapshot-restore and step-by-step playouts
+  otherwise, which is correct but slower.
 - For free placement specifically: a 2D mirror in `connectx.encoding` and extra
-  `Config` fields. See [todo.md](todo.md).
+  `Config` fields, if you want mirror augmentation. See [todo.md](todo.md).
 
 **A new preset.** Add it to `connectx.config.PRESETS`.
 
@@ -530,7 +536,7 @@ You will still need:
 ## Development
 
 ```bash
-pytest                          # 403 tests
+pytest                          # 513 tests
 pytest -m "not rl"              # skip tests needing the [rl] extra
 pytest --cov --cov-report=term-missing
 ruff check connectx agents tests recipes scripts
