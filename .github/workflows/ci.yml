@@ -18,15 +18,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
           - os: macos-latest
             python-version: "3.12"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -39,9 +39,15 @@ jobs:
       - name: Test
         run: pytest --cov --cov-report=term-missing --cov-report=xml
 
+      # numba is a pure accelerator here; the docs say so, so prove it.
+      - name: Test without the JIT
+        env:
+          NUMBA_DISABLE_JIT: "1"
+        run: pytest -q
+
       - name: Upload coverage
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.xml
@@ -50,9 +56,9 @@ jobs:
     name: lint and types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -75,9 +81,9 @@ jobs:
     name: cli smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
