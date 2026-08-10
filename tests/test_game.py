@@ -39,6 +39,32 @@ class TestGameStart:
         assert game.terminal()
         assert game.report()["winner"] == {"token": 1, "id": 0}
 
+    def test_resumed_seat_is_honoured(self, default_config: Config) -> None:
+        # Regression: transition recomputed active as time % n_players, which
+        # discarded the seat a resumed state was started with. Any position
+        # where the two disagreed corrected itself on the next move, so an
+        # agent searching from such a position had the wrong side to move.
+        game = Game(default_config)
+        grid = np.zeros(default_config["shape"], dtype=np.uint8)
+        grid[5, 0:3] = 2
+        game.start({"grid": grid, "info": {"active": 0, "time": 3}})
+        assert game.state["info"]["active"] == 0
+        state, _ = game.transition(6)
+        assert state["info"]["active"] == 1, (
+            "the seat must advance from the seat that moved"
+        )
+        state, _ = game.transition(5)
+        assert state["info"]["active"] == 0
+
+    def test_seat_rotation_matches_the_clock_for_fresh_games(
+        self, multiplayer_config: Config
+    ) -> None:
+        game = Game(multiplayer_config)
+        game.start()
+        for move in range(1, 7):
+            state, _ = game.transition(move % multiplayer_config["shape"][1])
+            assert state["info"]["active"] == move % 3
+
     def test_rejects_mismatched_grid_shape(self, default_config: Config) -> None:
         game = Game(default_config)
         with pytest.raises(ValueError, match="shape"):

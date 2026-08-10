@@ -190,9 +190,10 @@ class TestMCTSAgent:
         for players in ([1, 2], [1, 2, 3], [1, 2, 3, 4]):
             config = make_config((6, 7), 4, players)
             agent = MCTSAgent(config, simulations=1, seed=0)
-            assert agent._payoffs[0] == [0.0] * len(players)
-            for seat, token in enumerate(players):
-                payoff = agent._payoffs[token]
+            # Keyed by winning seat; -1 is a draw.
+            assert agent._payoffs[-1] == [0.0] * len(players)
+            for seat in range(len(players)):
+                payoff = agent._payoffs[seat]
                 assert payoff[seat] == 1.0
                 assert sum(payoff) == pytest.approx(0.0)
 

@@ -160,3 +160,15 @@ class TestVecGameMultiplayer:
         assert (vec.actives == 2).all()
         result = vec.step(np.full(2, 2, dtype=np.int64))
         assert result.rewards.shape == (2, 3)
+
+
+class TestVecGameSeatAdvance:
+    def test_seat_advances_from_the_current_seat(self) -> None:
+        # Matches the Game fix: the seat must not be recomputed from the clock,
+        # or a batch resumed at a non-canonical seat would correct itself.
+        config = make_config((4, 4), 3, [1, 2, 3])
+        vec = VecGame(config, 2, autoreset=False)
+        vec.reset()
+        for expected in (1, 2, 0, 1):
+            vec.step(np.full(2, expected % 4, dtype=np.int64))
+            assert (vec.actives == expected).all()

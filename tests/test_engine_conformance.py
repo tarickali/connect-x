@@ -15,14 +15,29 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+# pytest puts the tests directory on sys.path, so this is a plain import.
+from free_placement import FreePlacementGame
+
 from connectx import Game, GameEngine, implements_engine, make_config, preset
 from connectx.types import Config
 
 #: (name, factory, config). Extend this when adding a game.
+#:
+#: FreePlacementGame is a test fixture with no gravity and a ``rows * cols``
+#: action space. It is here so this suite proves the contract is really
+#: dynamics-agnostic rather than merely claiming to be: anything that quietly
+#: assumed "one action per column" fails on those rows.
 ENGINES = [
     ("Game/connect4", Game, preset("connect4")),
     ("Game/tiny", Game, preset("tiny")),
     ("Game/three-player", Game, make_config((5, 6), 3, [1, 2, 3])),
+    ("FreePlacement/3x3k3", FreePlacementGame, make_config((3, 3), 3, [1, 2])),
+    ("FreePlacement/5x5k4", FreePlacementGame, make_config((5, 5), 4, [1, 2])),
+    (
+        "FreePlacement/4x4k3-3p",
+        FreePlacementGame,
+        make_config((4, 4), 3, [1, 2, 3]),
+    ),
 ]
 
 IDS = [name for name, _, _ in ENGINES]
@@ -312,3 +327,117 @@ class TestConfigIsExtensible:
         config["gravity"] = False  # type: ignore[typeddict-unknown-key]
         assert validate_config(config) is config
         assert config["gravity"] is False  # type: ignore[typeddict-item]
+
+
+class TestAgentsGeneralize:
+    """The ladder must play a game whose dynamics it was not written for.
+
+    These run on every engine in ``ENGINES``, including the free-placement
+    fixture, whose action space is ``rows * cols`` rather than one per column
+    and which offers no compiled rollout. Before the agents were routed through
+    `agents.search.Position` they called the drop primitives directly and could
+    not play it at all.
+    """
+
+    @staticmethod
+    def _play(factory, config, specs, seed: int = 0) -> None:
+        from agents import agent_reset, make_agent
+
+        agents = [
+            make_agent(spec, config, seed=seed + i, engine=factory)
+            for i, spec in enumerate(specs)
+        ]
+        for agent in agents:
+            agent_reset(agent, config)
+        engine = factory(config)
+        state, actions = engine.start()
+        moves = 0
+        while not engine.terminal() and moves < 1000:
+            action = agents[state["info"]["active"]].select(state, actions)
+            assert actions[action] == 1, "agent chose an illegal action"
+            state, actions = engine.transition(action)
+            moves += 1
+        assert engine.terminal()
+
+    def test_greedy_plays(self, engine_case) -> None:
+        factory, config = engine_case
+        self._play(factory, config, ["greedy"] * len(config["players"]))
+
+    def test_mcts_plays(self, engine_case) -> None:
+        factory, config = engine_case
+        self._play(factory, config, ["mcts:simulations=30"] * len(config["players"]))
+
+    def test_minimax_plays(self, engine_case) -> None:
+        factory, config = engine_case
+        if len(config["players"]) != 2:
+            pytest.skip("minimax is two-player only")
+        self._play(factory, config, ["minimax:depth=2"] * 2)
+
+    def test_mixed_ladder_plays(self, engine_case) -> None:
+        factory, config = engine_case
+        specs = ["greedy", "mcts:simulations=30", "random", "random"]
+        self._play(factory, config, specs[: len(config["players"])])
+
+    def test_agents_beat_random_on_this_engine(self, engine_case) -> None:
+        """A baseline that cannot beat random is not a baseline."""
+        from connectx.arena import play_match
+
+        factory, config = engine_case
+        if len(config["players"]) != 2:
+            pytest.skip("two-player comparison")
+        match = play_match(config, ["greedy", "random"], games=20, seed=0, engine=factory)
+        assert match.score_rate(0) > match.score_rate(1)
+
+
+class TestSolvedGameOracle:
+    """Absolute strength check, not just relative.
+
+    Every other measurement in this project is agents against each other, which
+    cannot tell you whether any of them play *well*. Tic-tac-toe is small enough
+    to search exhaustively and is a known draw under perfect play, so it is a
+    ground truth the search can be held to — and it arrives via the
+    free-placement engine, which the agents were not written for.
+    """
+
+    TIC_TAC_TOE = make_config((3, 3), 3, [1, 2])
+
+    def test_perfect_play_always_draws(self) -> None:
+        from connectx.arena import play_match
+
+        # Depth 9 searches the whole game, so neither side can ever be beaten.
+        match = play_match(
+            self.TIC_TAC_TOE,
+            ["minimax:depth=9", "minimax:depth=9"],
+            games=40,
+            seed=0,
+            engine=FreePlacementGame,
+        )
+        assert match.draws == match.games, (
+            f"tic-tac-toe is a draw under perfect play, got {match.wins} wins"
+        )
+
+    def test_perfect_play_never_loses_to_anything(self) -> None:
+        from connectx.arena import play_match
+
+        for opponent in ("random", "greedy", "mcts:simulations=50"):
+            match = play_match(
+                self.TIC_TAC_TOE,
+                ["minimax:depth=9", opponent],
+                games=40,
+                seed=1,
+                engine=FreePlacementGame,
+            )
+            assert match.wins[1] == 0, f"perfect play lost to {opponent}"
+
+    def test_a_shallow_search_is_beatable(self) -> None:
+        """Sanity: the oracle test above passes because of depth, not by accident."""
+        from connectx.arena import play_match
+
+        match = play_match(
+            self.TIC_TAC_TOE,
+            ["minimax:depth=9", "minimax:depth=1"],
+            games=40,
+            seed=2,
+            engine=FreePlacementGame,
+        )
+        assert match.wins[0] > 0
