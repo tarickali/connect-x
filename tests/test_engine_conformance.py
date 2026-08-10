@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from connectx import Game, GameEngine, make_config, preset
+from connectx import Game, GameEngine, implements_engine, make_config, preset
 from connectx.types import Config
 
 #: (name, factory, config). Extend this when adding a game.
@@ -50,9 +50,25 @@ def play_random(engine, rng, limit: int = 10_000) -> int:
 
 
 class TestProtocol:
-    def test_satisfies_the_runtime_protocol(self, engine_case) -> None:
+    def test_satisfies_the_protocol(self, engine_case) -> None:
         factory, config = engine_case
-        assert isinstance(factory(config), GameEngine)
+        # Static check: safe on any Python version and any engine state.
+        assert implements_engine(factory(config))
+        assert implements_engine(factory)
+
+    def test_protocol_check_survives_an_unstarted_engine(self, engine_case) -> None:
+        # Regression: isinstance() against a runtime-checkable protocol calls
+        # hasattr on every member under Python <= 3.11, which evaluates the
+        # `state` property and raises before start(). CI caught this on 3.10
+        # and 3.11 while 3.12+ passed.
+        factory, config = engine_case
+        assert implements_engine(factory(config)) is True
+
+    def test_isinstance_agrees_once_started(self, engine_case) -> None:
+        factory, config = engine_case
+        engine = factory(config)
+        engine.start()
+        assert isinstance(engine, GameEngine)
 
     def test_accepts_the_factory_signature(self, engine_case) -> None:
         # The harness builds engines as engine(config) and engine(config, record=True).

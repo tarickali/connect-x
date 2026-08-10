@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+import inspect
+from typing import Any, Protocol, runtime_checkable
 
 from connectx.trajectory import Trajectory
 from connectx.types import (
@@ -13,7 +14,7 @@ from connectx.types import (
     StepResult,
 )
 
-__all__ = ["GameEngine"]
+__all__ = ["GameEngine", "implements_engine", "protocol_members"]
 
 
 @runtime_checkable
@@ -31,6 +32,15 @@ class GameEngine(Protocol):
 
     ``tests/test_engine_conformance.py`` exercises this protocol; run a new
     implementation through it rather than checking by eye.
+
+    .. warning::
+       Prefer :func:`implements_engine` over ``isinstance(x, GameEngine)``.
+       On Python 3.11 and earlier, ``isinstance`` against a runtime-checkable
+       protocol calls ``hasattr`` on every member, which *evaluates properties*.
+       Since :attr:`state` raises before ``start()``, the check would raise
+       ``RuntimeError`` instead of returning a bool. Python 3.12 switched to
+       ``inspect.getattr_static`` and does not have this problem;
+       :func:`implements_engine` behaves the same way on every version.
     """
 
     @property
@@ -97,3 +107,30 @@ class GameEngine(Protocol):
         an empty episode, so a caller that wanted data finds out immediately.
         """
         ...
+
+
+def protocol_members() -> frozenset[str]:
+    """The attribute names :class:`GameEngine` requires.
+
+    Derived from the protocol itself so it cannot drift as the protocol grows.
+    """
+    members = getattr(GameEngine, "__protocol_attrs__", None)
+    if members is None:  # Python <= 3.11
+        from typing import _get_protocol_attrs  # type: ignore[attr-defined]
+
+        members = _get_protocol_attrs(GameEngine)
+    return frozenset(members)
+
+
+def implements_engine(candidate: Any) -> bool:
+    """Whether ``candidate`` (an instance or a class) satisfies :class:`GameEngine`.
+
+    Use this instead of ``isinstance``. It inspects the type statically, so it
+    never evaluates a property, never raises on a not-yet-started engine, and
+    behaves identically on every supported Python version.
+    """
+    target = candidate if isinstance(candidate, type) else type(candidate)
+    return all(
+        inspect.getattr_static(target, name, None) is not None
+        for name in protocol_members()
+    )

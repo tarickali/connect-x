@@ -8,7 +8,7 @@ from connectx.config import (
     preset,
     validate_config,
 )
-from connectx.engine import GameEngine
+from connectx.engine import GameEngine, implements_engine, protocol_members
 from connectx.game import Game
 from connectx.trajectory import ReplayMemory, Trajectory, TrajectoryStep
 from connectx.types import (
@@ -51,6 +51,8 @@ __all__ = [
     # engine
     "Game",
     "GameEngine",
+    "implements_engine",
+    "protocol_members",
     # config
     "make_config",
     "validate_config",
