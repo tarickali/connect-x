@@ -114,12 +114,12 @@ Check `tests/test_game.py::TestGameStateIsolation`.
 | --- | ---: | --- |
 | `agents/types.py` | 96 | `Agent` protocol (just `select`) + `BaseAgent` (seeding, `reset`, `observe`). |
 | `agents/random.py` | 16 | Read it — it shows the seeding convention. |
-| `agents/greedy.py` | 58 | Win / block / centre. Works for any player count. |
+| `agents/greedy.py` | 59 | Win / block / centre. Works for any player count. |
 | `agents/search.py` | 163 | `Position`, the engine-agnostic push/pop cursor every search uses. |
 | `agents/heuristics.py` | 89 | **Scrutinize.** The weights are hand-picked. |
-| `agents/minimax.py` | 175 | Negamax + alpha-beta + transposition table. Two players. |
+| `agents/minimax.py` | 176 | Negamax + alpha-beta + transposition table. Two players. |
 | `agents/rollout.py` | 65 | JIT playout, the MCTS inner loop. |
-| `agents/mcts.py` | 204 | UCT with max^n backups. Any player count. |
+| `agents/mcts.py` | 208 | UCT with max^n backups. Any player count. |
 
 `minimax.py` is written as **negamax** rather than an explicit max/min pair
 specifically because the original bug was a mismatched
